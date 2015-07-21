@@ -1,0 +1,7 @@
+= sbt-release-gitflow: sbt plugin that handles all gitflow release steps
+Lance Gatlin <lance.gatlin@gmail.com>
+v1,21-Jul-2015
+:blogpost-status: unpublished
+:blogpost-categories: scala
+
+Based on https://github.com/sbt/sbt-release
