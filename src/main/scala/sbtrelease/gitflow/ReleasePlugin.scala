@@ -154,6 +154,8 @@ object ReleasePlugin extends AutoPlugin {
       ensureStagingClean,
       ensureCurrentBranch(_.extract.get(gitflowDevelopBranchName)),
       ensureNotBehindRemote,
+      runClean,
+      runTest,
       checkoutNewBranch(
         branchName = calcReleaseBranchName
       ),
@@ -163,13 +165,11 @@ object ReleasePlugin extends AutoPlugin {
         newVersion = getUpdatedVersion
       ),
       setVersion(getUpdatedVersion),
-      runClean,
-      runTest,
-      publishArtifacts,
       addAndCommitAll(
         commitMessage = calcVersionChangeCommitMessage
       ),
-      pushAllpushTags
+      pushAllpushTags,
+      publishArtifacts
     ),
 
     releaseCloseProcess := Seq[ReleaseStep](
@@ -180,14 +180,13 @@ object ReleasePlugin extends AutoPlugin {
       ensureCurrentBranch(getReleaseBranch),
       ensureNotBehindRemote,
       checkSnapshotDependencies,
+      runClean,
+      runTest,
       calcReleaseVersion,
       updateVersionFile(
         newVersion = getUpdatedVersion
       ),
       setVersion(getUpdatedVersion),
-      runClean,
-      runTest,
-      publishArtifacts,
       addAndCommitAll(
         commitMessage = calcVersionChangeCommitMessage
       ),
@@ -198,7 +197,8 @@ object ReleasePlugin extends AutoPlugin {
       ),
       tagRelease,
       pushAllpushTags,
-      deleteLocalAndRemoteBranch(getReleaseBranch)
+      deleteLocalAndRemoteBranch(getReleaseBranch),
+      publishArtifacts
     ),
 
     commands ++= Seq(releaseCreateCommand,releaseCloseCommand)
