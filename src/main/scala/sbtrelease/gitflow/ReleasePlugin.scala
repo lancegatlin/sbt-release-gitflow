@@ -37,13 +37,15 @@ object ReleasePlugin extends AutoPlugin {
       val nextVersion = AttributeKey[String]("nextVersion")
       val useDefaults = AttributeKey[Boolean]("releaseUseDefaults")
       val skipTests = AttributeKey[Boolean]("releaseSkipTests")
+      val skipPublish = AttributeKey[Boolean]("releaseSkipPublish")
       val cross = AttributeKey[Boolean]("releaseCross")
 
       val WithDefaults = "with-defaults"
       val SkipTests = "skip-tests"
+      val SkipPublish = "skip-publish"
       val CrossBuild = "cross"
       val FailureCommand = "--failure--"
-      val releaseParser = (Space ~> WithDefaults | Space ~> SkipTests | Space ~> CrossBuild).*
+      val releaseParser = (Space ~> WithDefaults | Space ~> SkipTests | Space ~> SkipPublish | Space ~> CrossBuild).*
 
       def mkReleaseCommand(
         key: String,
@@ -58,6 +60,7 @@ object ReleasePlugin extends AutoPlugin {
             .copy(onFailure = Some(FailureCommand))
             .put(useDefaults, args.contains(WithDefaults))
             .put(skipTests, args.contains(SkipTests))
+            .put(skipPublish, args.contains(skipPublish))
             .put(cross, crossEnabled)
 
           val initialChecks = releaseParts.map(_.check)

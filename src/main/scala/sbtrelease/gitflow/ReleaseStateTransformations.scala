@@ -75,22 +75,33 @@ object ReleaseStateTransformations {
 
   lazy val runClean : ReleaseStep = ReleaseStep(
     action = { st: State =>
-      st.log.info("Running clean....")
-      val extracted = Project.extract(st)
-      val ref = extracted.get(thisProjectRef)
-      extracted.runAggregated(clean in Global in ref, st)
+      if (
+        !st.get(skipTests).getOrElse(false) ||
+        !st.get(skipPublish).getOrElse(false)
+      ) {
+        st.log.info("Running clean....")
+        val extracted = Project.extract(st)
+        val ref = extracted.get(thisProjectRef)
+        extracted.runAggregated(clean in Global in ref, st)
+      } else {
+        st.log.info("Skipping clean...")
+        st
+      }
     }
   )
 
 
   lazy val runTest: ReleaseStep = ReleaseStep(
     action = { st: State =>
-      st.log.info("Runing tests...")
       if (!st.get(skipTests).getOrElse(false)) {
+        st.log.info("Running tests...")
         val extracted = Project.extract(st)
         val ref = extracted.get(thisProjectRef)
         extracted.runAggregated(test in Test in ref, st)
-      } else st
+      } else {
+        st.log.info("Skipping running tests...")
+        st
+      }
     },
     enableCrossBuild = true
   )
@@ -373,10 +384,15 @@ object ReleaseStateTransformations {
     enableCrossBuild = true
   )
    lazy val runPublishArtifactsAction = { st: State =>
-     st.log.info("Publishing artifacts...")
-     val extracted = st.extract
-    val ref = extracted.get(thisProjectRef)
-    extracted.runAggregated(releasePublishArtifactsAction in Global in ref, st)
+     if (!st.get(skipPublish).getOrElse(false)) {
+       st.log.info("Publishing artifacts...")
+       val extracted = st.extract
+       val ref = extracted.get(thisProjectRef)
+       extracted.runAggregated(releasePublishArtifactsAction in Global in ref, st)
+     } else {
+       st.log.info("Skipping publishing artifacts...")
+       st
+     }
   }
 
   def mergeBranch(branch: State => String, flags: Seq[String] = Nil) : ReleaseStep = { st:State =>
