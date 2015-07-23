@@ -21,26 +21,29 @@ class Git(val baseDir: File)(implicit logger:Logger) extends {
 
   private lazy val exec = executableName(commandName)
 
-  def cmd(args: Any*) : ProcessBuilder = {
+  def query(args: Any*) : ProcessBuilder =
+    Process(exec +: args.map(_.toString),baseDir)
+
+  def mutate(args: Any*) : ProcessBuilder = {
     val cmds = exec +: args.map(_.toString)
     logger.info(s"-- ${cmds.mkString(" ")}")
     Process(cmds, baseDir)
   }
 
   def add(files: String*) : ProcessBuilder =
-    cmd(("add" +: files): _*)
+    mutate(("add" +: files): _*)
 
   def commit(message: String) : ProcessBuilder =
-    cmd("commit", "-m", message)
+    mutate("commit", "-m", message)
 
   private lazy val trackingBranchCmd : ProcessBuilder =
-    cmd("config", "branch.%s.merge" format currentBranch)
+    query("config", "branch.%s.merge" format currentBranch)
 
   private def trackingBranch: String =
     (trackingBranchCmd !!).trim.stripPrefix("refs/heads/")
 
   private lazy val trackingRemoteCmd: ProcessBuilder =
-    cmd("config", "branch.%s.remote" format currentBranch)
+    query("config", "branch.%s.remote" format currentBranch)
 
   def trackingRemote: String = (trackingRemoteCmd !!) trim
 
@@ -48,60 +51,60 @@ class Git(val baseDir: File)(implicit logger:Logger) extends {
     trackingRemoteCmd ! devnull == 0 && trackingBranchCmd ! devnull == 0
 
   def currentBranch : String =
-    (cmd("symbolic-ref", "HEAD") !!).trim.stripPrefix("refs/heads/")
+    (query("symbolic-ref", "HEAD") !!).trim.stripPrefix("refs/heads/")
 
   def currentHash : String =
     revParse("HEAD")
 
   def checkout(branch: String) : String =
-    (cmd("checkout","-q",branch) !!).trim
+    (mutate("checkout","-q",branch) !!).trim
 
   private def revParse(name: String) : String =
-    (cmd("rev-parse", name) !!) trim
+    (query("rev-parse", name) !!) trim
 
   def isBehindRemote : Boolean =
-    (cmd(
+    (query(
       "rev-list",
       "%s..%s/%s".format(currentBranch, trackingRemote, trackingBranch)
     ) !! devnull).trim.nonEmpty
 
   def tag(name: String, comment: String, force: Boolean = false) : ProcessBuilder =
-    cmd("tag", "-a", name, "-m", comment, if(force) "-f" else "")
+    mutate("tag", "-a", name, "-m", comment, if(force) "-f" else "")
 
   def existsTag(name: String) : Boolean =
-    cmd("show-ref", "--quiet", "--tags", "--verify", "refs/tags/" + name) ! devnull == 0
+    query("show-ref", "--quiet", "--tags", "--verify", "refs/tags/" + name) ! devnull == 0
 
   def checkRemote(remote: String) : ProcessBuilder =
     fetch(remote)
 
   def fetch(remote: String) : ProcessBuilder =
-    cmd("fetch", remote)
+    mutate("fetch", remote)
 
-  def status : ProcessBuilder = cmd("status", "--porcelain")
+  def status : ProcessBuilder = query("status", "--porcelain")
 
-  def pushAll : ProcessBuilder = cmd("push","--all", trackingRemote)
+  def pushAll : ProcessBuilder = mutate("push","--all", trackingRemote)
 
-  def pushTags : ProcessBuilder = cmd("push","--tags")
+  def pushTags : ProcessBuilder = mutate("push","--tags")
 
   def allBranches : List[String] =
-    cmd("branch","-a").lines.map(_.substring(2)).toList
+    query("branch","-a").lines.map(_.substring(2)).toList
 
   def checkoutNewBranch(branch: String) : ProcessBuilder =
-    cmd("checkout","-q","-b",branch)
+    mutate("checkout","-q","-b",branch)
 
   def pushSetUpstream(remote: String) : ProcessBuilder =
-    cmd("push","-q","--set-upstream",remote,currentBranch)
+    mutate("push","-q","--set-upstream",remote,currentBranch)
 
   def merge(branch: String, flags: Seq[String] = Nil) : ProcessBuilder = {
     val args = Seq("merge","-q") ++ flags :+ branch
-    cmd(args:_*)
+    mutate(args:_*)
   }
 
   def deleteLocalBranch(branch: String) : ProcessBuilder =
-    cmd("branch","-d",branch)
+    mutate("branch","-d",branch)
 
   def deleteRemoteBranch(remote: String, branch: String) : ProcessBuilder =
-    cmd("push","--delete",remote,branch)
+    mutate("push","--delete",remote,branch)
 }
 
 object Git {
