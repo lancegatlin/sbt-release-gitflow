@@ -34,18 +34,26 @@ object ReleasePlugin extends AutoPlugin {
 
     object ReleaseKeys {
       val gitflowReleaseBranchName = AttributeKey[String]("Internal. Used to store the computed release branch name")
-      val nextVersion = AttributeKey[String]("nextVersion")
+      val updatedVersion = AttributeKey[String]("Internal. Used to store the updatedVersion")
       val useDefaults = AttributeKey[Boolean]("releaseUseDefaults")
       val skipTests = AttributeKey[Boolean]("releaseSkipTests")
       val skipPublish = AttributeKey[Boolean]("releaseSkipPublish")
+      val dryRun = AttributeKey[Boolean]("releaseSkipPublish")
       val cross = AttributeKey[Boolean]("releaseCross")
 
       val WithDefaults = "with-defaults"
+      val DryRun = "dry-run"
       val SkipTests = "skip-tests"
       val SkipPublish = "skip-publish"
       val CrossBuild = "cross"
       val FailureCommand = "--failure--"
-      val releaseParser = (Space ~> WithDefaults | Space ~> SkipTests | Space ~> SkipPublish | Space ~> CrossBuild).*
+      val releaseParser = (
+        Space ~> WithDefaults |
+        Space ~> SkipTests |
+        Space ~> SkipPublish |
+        Space ~> CrossBuild |
+        Space ~> DryRun
+      ).*
 
       def mkReleaseCommand(
         key: String,
@@ -60,7 +68,8 @@ object ReleasePlugin extends AutoPlugin {
             .copy(onFailure = Some(FailureCommand))
             .put(useDefaults, args.contains(WithDefaults))
             .put(skipTests, args.contains(SkipTests))
-            .put(skipPublish, args.contains(skipPublish))
+            .put(skipPublish, args.contains(SkipPublish))
+            .put(dryRun, args.contains(DryRun))
             .put(cross, crossEnabled)
 
           val initialChecks = releaseParts.map(_.check)
@@ -149,11 +158,11 @@ object ReleasePlugin extends AutoPlugin {
         branchName = calcReleaseBranchName
       ),
       checkoutBranch(_.extract.get(gitflowDevelopBranchName)),
-      calcNextVersion,
+      calcNextSnapshotVersion,
       updateVersionFile(
-        newVersion = getNextVersion
+        newVersion = getUpdatedVersion
       ),
-      setVersion(getNextVersion),
+      setVersion(getUpdatedVersion),
       runClean,
       runTest,
       publishArtifacts,
@@ -170,13 +179,14 @@ object ReleasePlugin extends AutoPlugin {
       ),
       ensureCurrentBranch(getReleaseBranch),
       ensureNotBehindRemote,
-      setVersion(getReleaseBranch.andThen(_.drop("release/".length))),
       checkSnapshotDependencies,
+      calcReleaseVersion,
+      updateVersionFile(
+        newVersion = getUpdatedVersion
+      ),
+      setVersion(getUpdatedVersion),
       runClean,
       runTest,
-      updateVersionFile(
-        newVersion = _.extract.get(version)
-      ),
       publishArtifacts,
       addAndCommitAll(
         commitMessage = calcVersionChangeCommitMessage

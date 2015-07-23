@@ -107,7 +107,7 @@ object ReleaseStateTransformations {
   )
 
 
-  val calcNextVersion : ReleaseStep = { st:State =>
+  val calcNextSnapshotVersion : ReleaseStep = { st:State =>
     val extracted = Project.extract(st)
 
     val useDefs = st.get(useDefaults).getOrElse(false)
@@ -117,7 +117,16 @@ object ReleaseStateTransformations {
     val suggestedNextV = nextFunc(currentV)
     val nextV = readVersion(suggestedNextV, "Next SNAPSHOT version [%s] : ", useDefs)
     
-    st.put(nextVersion, nextV)
+    st.put(updatedVersion, nextV)
+  }
+
+  val calcReleaseVersion : ReleaseStep = { st:State =>
+    val useDefs = st.get(useDefaults).getOrElse(false)
+
+    val suggestedReleaseV = getReleaseBranch.andThen(_.drop("release/".length))(st)
+    val nextV = readVersion(suggestedReleaseV, "Next release version [%s] : ", useDefs)
+    
+    st.put(updatedVersion, nextV)
   }
 
   def setVersion(newVersion: State => String) : ReleaseStep = { st:State =>
@@ -131,8 +140,8 @@ object ReleaseStateTransformations {
     ), st)
   }
 
-  def getNextVersion = { st:State =>
-    st.get(nextVersion).getOrElse(sys.error("Aborting nextVersion is not set!"))
+  def getUpdatedVersion = { st:State =>
+    st.get(updatedVersion).getOrElse(sys.error("Aborting updatedVersion is not set!"))
   }
 
   def updateVersionFile(newVersion: State => String) : ReleaseStep = { st: State =>
@@ -146,7 +155,8 @@ object ReleaseStateTransformations {
   }
 
   def git(st: State): Git = {
-    Git.detect(st.extract.get(baseDirectory))(st.log) match {
+    val isDryRun = st.get(dryRun).getOrElse(false)
+    Git.detect(st.extract.get(baseDirectory),isDryRun)(st.log) match {
       case None =>
         sys.error("Working directory is not a git repository")
       case Some(git) => git

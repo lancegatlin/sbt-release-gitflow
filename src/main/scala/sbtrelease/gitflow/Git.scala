@@ -4,7 +4,10 @@ import java.io.File
 
 import sbt._
 
-class Git(val baseDir: File)(implicit logger:Logger) extends {
+class Git(
+  val baseDir: File,
+  isDryRun: Boolean
+)(implicit logger:Logger) extends {
   val commandName = "git"
 
   protected def executableName(command: String) = {
@@ -26,8 +29,12 @@ class Git(val baseDir: File)(implicit logger:Logger) extends {
 
   def mutate(args: Any*) : ProcessBuilder = {
     val cmds = exec +: args.map(_.toString)
-    logger.info(s"-- ${cmds.mkString(" ")}")
-    Process(cmds, baseDir)
+    if(isDryRun) {
+      Process("echo " +: cmds, baseDir)
+    } else {
+      logger.info(s"-- ${cmds.mkString(" ")}")
+      Process(cmds, baseDir)
+    }
   }
 
   def add(files: String*) : ProcessBuilder =
@@ -108,8 +115,8 @@ class Git(val baseDir: File)(implicit logger:Logger) extends {
 }
 
 object Git {
-  def detect(dir: File)(implicit logger: Logger) : Option[Git] = {
-    Git.isRepository(dir).map(new Git(_))
+  def detect(dir: File, isDryRun: Boolean)(implicit logger: Logger) : Option[Git] = {
+    Git.isRepository(dir).map(dir => new Git(dir,isDryRun))
   }
 
   def isRepository(dir: File): Option[File] =
