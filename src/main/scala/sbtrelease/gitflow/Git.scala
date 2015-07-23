@@ -124,18 +124,12 @@ class Git(
   def allBranches : List[String] =
     query("branch","-a").split('\n').map(_.substring(2)).toList
 
-  def checkoutNewBranch(branch: String) : Boolean =
-    mutate("checkout","-q","-b",branch).trim.isEmpty
+  def checkoutNewBranch(branch: String) : Unit =
+    mutate("checkout","-q","-b",branch).trim
 
-  def pushSetUpstream(remote: String) : Boolean = {
+  def pushSetUpstream(remote: String) : Unit = {
     val bname = currentBranch
-    val expectedResult =
-      if(!isDryRun) {
-        s"Branch $bname set up to track remote branch $bname from $remote."
-      } else {
-        ""
-      }
-    mutate("push","-q","--set-upstream",remote,bname).trim == expectedResult
+    mutate("push","-q","--set-upstream",remote,bname)
   }
 
   def merge(branch: String, flags: Seq[String] = Nil) : Unit = {

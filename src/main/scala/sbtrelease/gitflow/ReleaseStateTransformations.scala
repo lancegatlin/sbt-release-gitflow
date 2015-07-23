@@ -276,12 +276,8 @@ object ReleaseStateTransformations {
 
     val vc = git(st)
     val remote = vc.trackingRemote
-    if(!vc.checkoutNewBranch(bname)) {
-      sys.error(s"Failed to checkout branch $bname")
-    }
-    if(!vc.pushSetUpstream(remote)) {
-      sys.error(s"Failed to push --set-upstream")
-    }
+    vc.checkoutNewBranch(bname)
+    vc.pushSetUpstream(remote)
     st
   }
   
