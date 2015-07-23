@@ -90,6 +90,25 @@ object ReleaseStateTransformations {
     }
   )
 
+  lazy val runUpdate: ReleaseStep = ReleaseStep(
+    action = { st: State =>
+      if (
+        // Only need to run update if skipping tests but still publishing
+        // (test will perform update)
+        st.get(skipTests).getOrElse(false) &&
+        !st.get(skipPublish).getOrElse(false)
+      ) {
+        st.log.info("Running update...")
+        val extracted = Project.extract(st)
+        val ref = extracted.get(thisProjectRef)
+        extracted.runAggregated(update in Global in ref, st)
+      } else {
+        st.log.info("Skipping update...")
+        st
+      }
+    },
+    enableCrossBuild = true
+  )
 
   lazy val runTest: ReleaseStep = ReleaseStep(
     action = { st: State =>

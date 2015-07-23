@@ -155,6 +155,7 @@ object ReleasePlugin extends AutoPlugin {
       ensureCurrentBranch(_.extract.get(gitflowDevelopBranchName)),
       ensureNotBehindRemote,
       runClean,
+      runUpdate,
       runTest,
       checkoutNewBranch(
         branchName = calcReleaseBranchName
@@ -181,6 +182,7 @@ object ReleasePlugin extends AutoPlugin {
       ensureNotBehindRemote,
       checkSnapshotDependencies,
       runClean,
+      runUpdate,
       runTest,
       calcReleaseVersion,
       updateVersionFile(
