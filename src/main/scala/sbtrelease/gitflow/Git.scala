@@ -8,6 +8,9 @@ class Git(
   val baseDir: File,
   isDryRun: Boolean
 )(implicit logger:Logger) extends {
+  val errToInfoLogger = Git.errToInfoLogger(logger)
+  implicit val plog : ProcessLogger = logger
+
   val commandName = "git"
 
   protected def executableName(command: String) = {
@@ -24,97 +27,137 @@ class Git(
 
   private lazy val exec = executableName(commandName)
 
-  def query(args: Any*) : ProcessBuilder =
-    Process(exec +: args.map(_.toString),baseDir)
+  private def query(args: Any*)(implicit _logger: ProcessLogger) : String =
+    {
+      val cmds = exec +: args.map(_.toString)
+//      logger.info(s"-- ${cmds.map { c =>
+//        if(c.exists(_.isWhitespace)) {
+//          s"'$c'"
+//        } else {
+//          c
+//        }
+//      }.mkString(" ")}")
 
-  def mutate(args: Any*) : ProcessBuilder = {
+      val p = Process(cmds,baseDir)
+      val buffer = new StringBuffer
+      val pr = p.run(BasicIO(buffer, Some(_logger), false))
+      pr.exitValue()
+      // Ignore non zero exit values for queries
+//      if (code == 0) buffer.toString else sys.error("Nonzero exit value: " + code)
+      pr.destroy()
+      buffer.toString
+    }
+
+  private def mutate(args: Any*)(implicit _logger: ProcessLogger) : String = {
     val cmds = exec +: args.map(_.toString)
-    if(isDryRun) {
-      Process("echo " +: cmds, baseDir)
+    logger.info(s"-- ${cmds.map { c =>
+      if(c.exists(_.isWhitespace)) {
+        s"'$c'"
+      } else {
+        c
+      }
+    }.mkString(" ")}")
+    if(!isDryRun) {
+      Process(cmds, baseDir) !! _logger
     } else {
-      logger.info(s"-- ${cmds.mkString(" ")}")
-      Process(cmds, baseDir)
+      ""
     }
   }
 
-  def add(files: String*) : ProcessBuilder =
+  def add(files: String*) : Unit =
     mutate(("add" +: files): _*)
 
-  def commit(message: String) : ProcessBuilder =
+  def commit(message: String) : Unit =
     mutate("commit", "-m", message)
 
-  private lazy val trackingBranchCmd : ProcessBuilder =
-    query("config", "branch.%s.merge" format currentBranch)
+  def trackingBranch: String =
+    query("config", s"branch.$currentBranch.merge").trim.stripPrefix("refs/heads/")
 
-  private def trackingBranch: String =
-    (trackingBranchCmd !!).trim.stripPrefix("refs/heads/")
+  def trackingRemote(branch: String): String = {
+    query("config", s"branch.$branch.remote").trim
+  }
+  def trackingRemote: String =
+    trackingRemote(currentBranch)
 
-  private lazy val trackingRemoteCmd: ProcessBuilder =
-    query("config", "branch.%s.remote" format currentBranch)
-
-  def trackingRemote: String = (trackingRemoteCmd !!) trim
 
   def hasUpstream : Boolean =
-    trackingRemoteCmd ! devnull == 0 && trackingBranchCmd ! devnull == 0
+    trackingRemote.nonEmpty && trackingBranch.nonEmpty
 
   def currentBranch : String =
-    (query("symbolic-ref", "HEAD") !!).trim.stripPrefix("refs/heads/")
+    query("symbolic-ref", "HEAD").trim.stripPrefix("refs/heads/")
 
   def currentHash : String =
     revParse("HEAD")
 
-  def checkout(branch: String) : String =
-    (mutate("checkout","-q",branch) !!).trim
+  def checkout(branch: String) : Boolean =
+    mutate("checkout","-q",branch).isEmpty
 
   private def revParse(name: String) : String =
-    (query("rev-parse", name) !!) trim
+    query("rev-parse", name).trim
 
   def isBehindRemote : Boolean =
-    (query(
+    query(
       "rev-list",
-      "%s..%s/%s".format(currentBranch, trackingRemote, trackingBranch)
-    ) !! devnull).trim.nonEmpty
+      s"$currentBranch..$trackingRemote/$trackingBranch"
+    ).trim.nonEmpty
 
-  def tag(name: String, comment: String, force: Boolean = false) : ProcessBuilder =
+  def tag(name: String, comment: String, force: Boolean = false) : Unit =
     mutate("tag", "-a", name, "-m", comment, if(force) "-f" else "")
 
-  def existsTag(name: String) : Boolean =
-    query("show-ref", "--quiet", "--tags", "--verify", "refs/tags/" + name) ! devnull == 0
+  def tagExists(name: String) : Boolean =
+    query("show-ref", "--tags", "--verify", "refs/tags/" + name)(devnull).nonEmpty
 
-  def checkRemote(remote: String) : ProcessBuilder =
-    fetch(remote)
+//  def checkRemote(remote: String) : ProcessBuilder =
+//    fetch(remote)
 
-  def fetch(remote: String) : ProcessBuilder =
-    mutate("fetch", remote)
+//  def fetch(remote: String) : ProcessBuilder =
+//    mutate("fetch", remote)
 
-  def status : ProcessBuilder = query("status", "--porcelain")
+  def status : String = query("status", "--porcelain")
 
-  def pushAll : ProcessBuilder = mutate("push","--all", trackingRemote)
+  def pushAll : Unit =
+    mutate("push","--all", trackingRemote)(errToInfoLogger)
 
-  def pushTags : ProcessBuilder = mutate("push","--tags")
+  def pushTags : Unit =
+    mutate("push","--tags")(errToInfoLogger)
 
   def allBranches : List[String] =
-    query("branch","-a").lines.map(_.substring(2)).toList
+    query("branch","-a").split('\n').map(_.substring(2)).toList
 
-  def checkoutNewBranch(branch: String) : ProcessBuilder =
-    mutate("checkout","-q","-b",branch)
+  def checkoutNewBranch(branch: String) : Boolean =
+    mutate("checkout","-q","-b",branch).trim.isEmpty
 
-  def pushSetUpstream(remote: String) : ProcessBuilder =
-    mutate("push","-q","--set-upstream",remote,currentBranch)
+  def pushSetUpstream(remote: String) : Boolean = {
+    val bname = currentBranch
+    val expectedResult =
+      if(!isDryRun) {
+        s"Branch $bname set up to track remote branch $bname from $remote."
+      } else {
+        ""
+      }
+    mutate("push","-q","--set-upstream",remote,bname).trim == expectedResult
+  }
 
-  def merge(branch: String, flags: Seq[String] = Nil) : ProcessBuilder = {
+  def merge(branch: String, flags: Seq[String] = Nil) : Unit = {
     val args = Seq("merge","-q") ++ flags :+ branch
     mutate(args:_*)
   }
 
-  def deleteLocalBranch(branch: String) : ProcessBuilder =
+  def deleteLocalBranch(branch: String) : Unit =
     mutate("branch","-d",branch)
 
-  def deleteRemoteBranch(remote: String, branch: String) : ProcessBuilder =
-    mutate("push","--delete",remote,branch)
+  def deleteRemoteBranch(remote: String, branch: String) : Unit =
+    mutate("push","--delete",remote,branch)(errToInfoLogger)
 }
 
 object Git {
+  // Note: git sometimes sends output to stderr for whatever reason, redirect it to info here
+  def errToInfoLogger(logger: Logger) = new ProcessLogger {
+    def info(s: => String) = logger.info(s)
+    def error(s: => String) = logger.info(s)
+    def buffer[T](f: => T) = logger.buffer(f)
+  }
+
   def detect(dir: File, isDryRun: Boolean)(implicit logger: Logger) : Option[Git] = {
     Git.isRepository(dir).map(dir => new Git(dir,isDryRun))
   }

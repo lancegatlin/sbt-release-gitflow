@@ -67,8 +67,8 @@ object ReleasePlugin extends AutoPlugin {
           val startState = st
             .copy(onFailure = Some(FailureCommand))
             .put(useDefaults, args.contains(WithDefaults))
-            .put(skipTests, args.contains(SkipTests))
-            .put(skipPublish, args.contains(SkipPublish))
+            .put(skipTests, args.contains(SkipTests) || args.contains(DryRun))
+            .put(skipPublish, args.contains(SkipPublish) || args.contains(DryRun))
             .put(dryRun, args.contains(DryRun))
             .put(cross, crossEnabled)
 

@@ -150,7 +150,10 @@ object ReleaseStateTransformations {
     val useGlobal = st.extract.get(releaseUseGlobalVersion)
     val versionStr = (if (useGlobal) globalVersionString else versionString) format v
     val file = st.extract.get(releaseVersionFile)
-    IO.write(file, versionStr + "\n")
+    val isDryRun = st.get(dryRun).getOrElse(false)
+    if(!isDryRun) {
+      IO.write(file, versionStr + "\n")
+    }
     st
   }
 
@@ -166,7 +169,7 @@ object ReleaseStateTransformations {
    lazy val ensureStagingClean : ReleaseStep = { st: State =>
      st.log.info("Ensuring staging is clean... ")
 
-     val status = (git(st).status !!).trim
+     val status = git(st).status
     if (status.nonEmpty) {
       sys.error("Working directory is dirty.")
     }
@@ -223,21 +226,26 @@ object ReleaseStateTransformations {
   }
 
   def ensureCurrentBranch(branchName: State => String) : ReleaseStep = { st:State =>
-    val bname = branchName(st)
-    st.log.info(s"Ensuring current branch is $bname...")
-    if(git(st).currentBranch != bname) {
-      sys.error(s"Must be started from branch $bname")
-    } 
-    st
+    val isDryRun = st.get(dryRun).getOrElse(false)
+    if(!isDryRun) {
+      val bname = branchName(st)
+      st.log.info(s"Ensuring current branch is $bname...")
+      if(git(st).currentBranch != bname) {
+        sys.error(s"Must be started from branch $bname")
+      }
+      st
+    } else {
+      st
+    }
   }
   
   def checkoutBranch(branchName: State => String) : ReleaseStep = { st: State =>
+
     val bname = branchName(st)
     st.log.info(s"Checking out $bname...")
 
-    val status = git(st).checkout(bname)
-    if (status.nonEmpty) {
-      sys.error(s"Could not checkout $bname branch. git returned: $status")
+    if (!git(st).checkout(bname)) {
+      sys.error(s"Failed to checkout $bname branch")
     }
     st
   }
@@ -268,15 +276,11 @@ object ReleaseStateTransformations {
 
     val vc = git(st)
     val remote = vc.trackingRemote
-    val logger = errToInfoLogger(st.log)
-    val result1 = vc.checkoutNewBranch(bname).!!(logger).trim
-    if(result1.nonEmpty) {
-      sys.error(s"Unexpected git result: $result1")
+    if(!vc.checkoutNewBranch(bname)) {
+      sys.error(s"Failed to checkout branch $bname")
     }
-    val result2 = vc.pushSetUpstream(remote).!!(logger).trim
-    val expectedResult2 = s"Branch $bname set up to track remote branch $bname from $remote."
-    if(result2 != expectedResult2) {
-      sys.error(s"Expected $expectedResult2 but got git result: $result2")
+    if(!vc.pushSetUpstream(remote)) {
+      sys.error(s"Failed to push --set-upstream")
     }
     st
   }
@@ -289,15 +293,9 @@ object ReleaseStateTransformations {
   def addAndCommitAll(commitMessage: State => String) : ReleaseStep = { st: State =>
     val cm = commitMessage(st)
     st.log.info(s"Adding all changes and committing with message: '$cm'")
-    git(st).add(".") !! st.log
-    git(st).commit(cm) ! st.log
+    git(st).add(".")
+    git(st).commit(cm)
     st
-  }
-
-  def errToInfoLogger(logger: Logger) = new ProcessLogger {
-    def info(s: => String) = logger.info(s)
-    def error(s: => String) = logger.info(s)
-    def buffer[T](f: => T) = logger.buffer(f)
   }
 
   lazy val pushAllpushTags : ReleaseStep = { st:State =>
@@ -307,10 +305,8 @@ object ReleaseStateTransformations {
     if (vc.hasUpstream) {
       defaultChoice orElse SimpleReader.readLine("Push all changes (and tags) to the remote repository (y/n)? [y] ") match {
         case Yes() | Some("") =>
-          // Note: git sends output to stderr for whatever reason, redirect it to info here
-          val logger = errToInfoLogger(st.log)
-          git(st).pushAll.!!(logger)
-          git(st).pushTags.!!(logger)
+          git(st).pushAll
+          git(st).pushTags
         case _ => st.log.warn("Remember to push the changes yourself!")
       }
     } else {
@@ -324,16 +320,12 @@ object ReleaseStateTransformations {
     st.log.info(s"Deleting branch $branch...")
 
     val defaultChoice = extractDefault(st, "y")
-    val logger = errToInfoLogger(st.log)
     val vc = git(st)
       defaultChoice orElse SimpleReader.readLine(s"Delete branch $branch (y/n)? [y] ") match {
         case Yes() | Some("") =>
-          val currentBranch = vc.currentBranch
-          vc.checkout(branch)
-          val remote = vc.trackingRemote
-          vc.checkout(currentBranch)
-          vc.deleteLocalBranch(branch) !! logger
-          vc.deleteRemoteBranch(remote, branch) !! logger
+          val remote = vc.trackingRemote(branch)
+          vc.deleteLocalBranch(branch)
+          vc.deleteRemoteBranch(remote, branch)
         case _ =>
       }
     st
@@ -345,7 +337,7 @@ object ReleaseStateTransformations {
 
     @tailrec
     def findTag(tag: String): Option[String] = {
-      if (git(st).existsTag(tag)) {
+      if (git(st).tagExists(tag)) {
         defaultChoice orElse SimpleReader.readLine("Tag [%s] exists! Overwrite, keep or abort or enter a new tag (o/k/a)? [a] " format tag) match {
           case Some("" | "a" | "A") =>
             sys.error("Tag [%s] already exists. Aborting release!" format tag)
@@ -372,8 +364,7 @@ object ReleaseStateTransformations {
     val (tagState, tag) = st.extract.runTask(releaseTagName, st)
     val (commentState, comment) = st.extract.runTask(releaseTagComment, tagState)
     val tagToUse = findTag(tag)
-    tagToUse.foreach(git(commentState).tag(_, comment, force = true) !! commentState.log)
-
+    tagToUse.foreach(git(commentState).tag(_, comment, force = true))
 
     tagToUse map (t =>
       reapply(Seq[Setting[_]](
@@ -409,7 +400,7 @@ object ReleaseStateTransformations {
     val bname = branch(st)
     val _git = git(st)
     st.log.info(s"Merging branch $bname to ${_git.currentBranch}" )
-    _git.merge(bname,flags) !! st.log
+    _git.merge(bname,flags)
     st
   }
 
