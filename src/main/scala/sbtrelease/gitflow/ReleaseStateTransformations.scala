@@ -143,7 +143,7 @@ object ReleaseStateTransformations {
     val useDefs = st.get(useDefaults).getOrElse(false)
 
     val suggestedReleaseV = getReleaseBranch.andThen(_.drop("release/".length))(st)
-    val nextV = readVersion(suggestedReleaseV, "Next release version [%s] : ", useDefs)
+    val nextV = readVersion(suggestedReleaseV, "Set release version (dropped -SNAPSHOT) [%s] : ", useDefs)
     
     st.put(updatedVersion, nextV)
   }
