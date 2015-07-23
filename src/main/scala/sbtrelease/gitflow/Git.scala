@@ -129,7 +129,7 @@ class Git(
 
   def pushSetUpstream(remote: String) : Unit = {
     val bname = currentBranch
-    mutate("push","-q","--set-upstream",remote,bname)
+    mutate("push","-q","--set-upstream",remote,bname)(errToInfoLogger)
   }
 
   def merge(branch: String, flags: Seq[String] = Nil) : Unit = {
