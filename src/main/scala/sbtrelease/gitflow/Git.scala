@@ -43,7 +43,6 @@ class Git(
       val pr = p.run(BasicIO(buffer, Some(_logger), false))
       pr.exitValue()
       // Ignore non zero exit values for queries
-//      if (code == 0) buffer.toString else sys.error("Nonzero exit value: " + code)
       pr.destroy()
       buffer.toString
     }
@@ -115,11 +114,12 @@ class Git(
 
   def status : String = query("status", "--porcelain")
 
-  def pushAll : Unit =
-    mutate("push","--all", trackingRemote)(errToInfoLogger)
+  def pushBranch(branch: String) : Unit = {
+    mutate("push",trackingRemote(branch),branch)(errToInfoLogger)
+  }
 
-  def pushTags : Unit =
-    mutate("push","--tags")(errToInfoLogger)
+  def pushTag(tagName: String) : Unit =
+    mutate("push",trackingRemote,tagName)(errToInfoLogger)
 
   def allBranches : List[String] =
     query("branch","-a").split('\n').map(_.substring(2)).toList
@@ -138,7 +138,7 @@ class Git(
   }
 
   def deleteLocalBranch(branch: String) : Unit =
-    mutate("branch","-d",branch)
+    mutate("branch","-D",branch)
 
   def deleteRemoteBranch(remote: String, branch: String) : Unit =
     mutate("push","--delete",remote,branch)(errToInfoLogger)

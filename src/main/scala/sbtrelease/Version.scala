@@ -1,5 +1,7 @@
 package sbtrelease
 
+import sbtrelease.Utilities._
+
 import scala.util.control.Exception._
 
 object Version {
@@ -19,16 +21,16 @@ object Version {
   val VersionR = """([0-9]+)(?:(?:\.([0-9]+))?(?:\.([0-9]+))?)?([\-0-9a-zA-Z]*)?""".r
   val PreReleaseQualifierR = """[\.-](?i:rc|m|alpha|beta)[\.-]?[0-9]*""".r
 
-  def apply(s: String): Option[Version] = {
+  def apply(s: String): Version = {
     allCatch opt {
       val VersionR(maj, min, mic, qual) = s
       Version(maj.toInt, Option(min).map(_.toInt), Option(mic).map(_.toInt), Option(qual).filterNot(_.isEmpty))
     }
-  }
+  }.getOrElse(versionFormatError)
 }
 
 case class Version(major: Int, minor: Option[Int], bugfix: Option[Int], qualifier: Option[String]) {
-  def bump = {
+  def bump : Version = {
     val maybeBumpedPrerelease = qualifier.collect {
       case Version.PreReleaseQualifierR() => withoutQualifier
     }
@@ -42,16 +44,17 @@ case class Version(major: Int, minor: Option[Int], bugfix: Option[Int], qualifie
       .getOrElse(bumpedMajor)
   }
 
-  def bumpMajor = copy(major = major + 1, minor = minor.map(_ => 0), bugfix = bugfix.map(_ => 0))
-  def bumpMinor = copy(minor = minor.map(_ + 1), bugfix = bugfix.map(_ => 0))
-  def bumpBugfix = copy(bugfix = bugfix.map(_ + 1))
+  def bumpMajor : Version = copy(major = major + 1, minor = minor.map(_ => 0), bugfix = bugfix.map(_ => 0))
+  def bumpMinor : Version = copy(minor = minor.map(_ + 1), bugfix = bugfix.map(_ => 0))
+  def bumpBugfix : Version = copy(bugfix = bugfix.map(_ + 1))
 
   def bump(bumpType: Version.Bump): Version = bumpType.bump(this)
 
-  def withoutQualifier = copy(qualifier = None)
-  def asSnapshot = copy(qualifier = Some("-SNAPSHOT"))
+  def withoutQualifier : Version = copy(qualifier = None)
+  def asSnapshot : Version = copy(qualifier = Some("-SNAPSHOT"))
 
-  def string = "" + major + get(minor) + get(bugfix) + qualifier.getOrElse("")
+  override def toString =
+    s"$major${get(minor)}${get(bugfix)}${qualifier.getOrElse("")}"
 
   private def get(part: Option[Int]) = part.map("." + _).getOrElse("")
 }

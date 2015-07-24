@@ -3,113 +3,80 @@ package sbtrelease.gitflow
 import sbt.Keys._
 import sbt._
 import sbt.complete.DefaultParsers._
-import sbt.complete.Parser
 import sbtrelease._
+import sbtrelease.gitflow.ReleaseStateTransformations.Helper
 
 object ReleasePlugin extends AutoPlugin {
+  import Utilities._
 
   object autoImport {
     // More commonly configured settings
     val releaseVersionBump = settingKey[Version.Bump]("How the version should be incremented")
-    val releaseTagComment = taskKey[String]("The comment to use when tagging")
-    val versionChangeCommitMessage = taskKey[String]("The commit message to use when version is bumped")
-    val releaseTagName = taskKey[String]("The name of the tag. Defaults to 'vX.Y.Z'")
-    val releaseCreateProcess = settingKey[Seq[ReleaseStep]]("The release creation process")
-    val releaseCloseProcess = settingKey[Seq[ReleaseStep]]("The release merge close process")
-    val releaseCrossBuild = settingKey[Boolean]("Whether the release should be cross built")
+    val releaseCalcTagComment = settingKey[Version => String]("Compute the tag comment from version")
+    val releaseCalcVersionChangeCommitMessage = settingKey[Version => String]("The commit message to use when version is bumped")
+    val releaseCalcTag = settingKey[Version => (String,String)]("Compute the tag name and comment from version. Defaults to 'v' + version")
+    val releaseCreateSteps = settingKey[Config => Step[Unit]]("The release creation process")
+    val releaseCloseSteps = settingKey[Config => Step[Unit]]("The release close process")
     val releaseUseGlobalVersion = settingKey[Boolean]("Whether to use a global version")
-    val globalVersionString = "version in ThisBuild := \"%s\""
-    val versionString = "version := \"%s\""
 
     // Less commonly used settings
     val releaseSnapshotDependencies = taskKey[Seq[ModuleID]]("Calculate the snapshot dependencies for a build")
-    val releaseCalcNextVersion = settingKey[String => String]("Function to compute the next release version from the last version. Defaults to version bump.")
+    val releaseCalcNextSnapshotVersion = settingKey[Version => Version]("Function to compute the next release version from the last version. Defaults to version bump.")
     val releaseVersionFile = settingKey[File]("The file to write the version to. Defaults to version.sbt")
     val releasePublishArtifactsAction = taskKey[Unit]("The action that should be performed to publish artifacts. Defaults to publish")
 
     // Gitflow configurables
     val gitflowMasterBranchName = settingKey[String]("Branch name for master branch")
     val gitflowDevelopBranchName = settingKey[String]("Branch name for the develop branch")
-    val calcGitflowReleaseBranchName = settingKey[String => String]("Function to compute the name of a gitflow release branch from the version. Defaults to 'release/X.Y.Z'")
+    val calcGitflowReleaseBranchName = settingKey[Version => String]("Function to compute the name of a gitflow release branch from the version. Defaults to 'release/X.Y.Z'")
 
     object ReleaseKeys {
-      val gitflowReleaseBranchName = AttributeKey[String]("Internal. Used to store the computed release branch name")
-      val updatedVersion = AttributeKey[String]("Internal. Used to store the updatedVersion")
-      val useDefaults = AttributeKey[Boolean]("releaseUseDefaults")
-      val skipTests = AttributeKey[Boolean]("releaseSkipTests")
-      val skipPublish = AttributeKey[Boolean]("releaseSkipPublish")
-      val dryRun = AttributeKey[Boolean]("releaseSkipPublish")
-      val cross = AttributeKey[Boolean]("releaseCross")
-
       val WithDefaults = "with-defaults"
       val DryRun = "dry-run"
       val SkipTests = "skip-tests"
       val SkipPublish = "skip-publish"
       val CrossBuild = "cross"
       val FailureCommand = "--failure--"
-      val releaseParser = (
+      val releaseArgsParser = (
         Space ~> WithDefaults |
         Space ~> SkipTests |
         Space ~> SkipPublish |
         Space ~> CrossBuild |
         Space ~> DryRun
-      ).*
-
-      def mkReleaseCommand(
-        key: String,
-        p: SettingKey[Seq[ReleaseStep]],
-        parser: Parser[Seq[String]]
-      ): Command =
-        Command(key)(_ => parser) { (st, args) =>
-          val extracted = Project.extract(st)
-          val releaseParts = extracted.get(p)
-          val crossEnabled = extracted.get(releaseCrossBuild) || args.contains(CrossBuild)
-          val startState = st
-            .copy(onFailure = Some(FailureCommand))
-            .put(useDefaults, args.contains(WithDefaults))
-            .put(skipTests, args.contains(SkipTests) || args.contains(DryRun))
-            .put(skipPublish, args.contains(SkipPublish) || args.contains(DryRun))
-            .put(dryRun, args.contains(DryRun))
-            .put(cross, crossEnabled)
-
-          val initialChecks = releaseParts.map(_.check)
-
-          def filterFailure(f: State => State)(s: State): State = {
-            s.remainingCommands match {
-              case FailureCommand :: tail => s.fail
-              case _ => f(s)
-            }
-          }
-
-          val removeFailureCommand = { s: State =>
-            s.remainingCommands match {
-              case FailureCommand :: tail => s.copy(remainingCommands = tail)
-              case _ => s
-            }
-          }
-
-          val process = releaseParts.map { step =>
-            if (step.enableCrossBuild && crossEnabled) {
-              filterFailure(ReleaseStateTransformations.runCrossBuild(step.action)) _
-            } else filterFailure(step.action) _
-          }
-
-          initialChecks.foreach(_(startState))
-          Function.chain(process :+ removeFailureCommand)(startState)
+      ).*.map(Args.apply)
+      
+      val releaseCreateCommand =
+        Command("releaseCreate")(_ => releaseArgsParser) { (s1,args) =>
+          val e = Project.extract(s1)
+          val f = e.get(releaseCreateSteps)
+          val cfg = Config(e,args,s1.log)
+          f(cfg)(s1)._1
         }
 
-      lazy val releaseCreateCommandKey = "releaseCreate"
-      val releaseCreateCommand = mkReleaseCommand(
-        releaseCreateCommandKey,
-        releaseCreateProcess,
-        releaseParser
-      )
-      lazy val releaseCloseCommandKey = "releaseClose"
-      val releaseCloseCommand = mkReleaseCommand(
-        releaseCloseCommandKey,
-        releaseCloseProcess,
-        releaseParser
-      )
+      val releaseCloseCommand =
+        Command("releaseClose")(_ => releaseArgsParser) { (s1,args) =>
+          val e = Project.extract(s1)
+          val f = e.get(releaseCloseSteps)
+          val cfg = Config(e,args,s1.log)
+          f(cfg)(s1)._1
+        }
+      val releaseAbortCommand =
+        Command("releaseAbort")(_ => releaseArgsParser) { (s1,args) =>
+          import args._
+
+          val e = Project.extract(s1)
+          val cfg = Config(e,args,s1.log)
+          import cfg._
+          val helper = new Helper(cfg)
+          import helper._
+
+          val releaseBranch =
+            findReleaseBranch(searchRemote = false)
+              .getOrDie("Could not find release branch!")
+          checkoutBranch(developBranch)
+          deleteLocalAndRemoteBranch(releaseBranch)
+          s1
+        }
     }
 
   }
@@ -124,7 +91,7 @@ object ReleasePlugin extends AutoPlugin {
   override def projectSettings = Seq[Setting[_]](
     gitflowDevelopBranchName := "develop",
     gitflowMasterBranchName := "master",
-    calcGitflowReleaseBranchName := { version:String => s"release/$version"},
+    calcGitflowReleaseBranchName := { version:Version => s"release/${version.withoutQualifier}"},
     releaseSnapshotDependencies := {
       val moduleIds = (managedClasspath in Runtime).value.flatMap(_.get(moduleID.key))
       val snapshots = moduleIds.filter(m => m.isChanging || m.revision.endsWith("-SNAPSHOT"))
@@ -132,74 +99,91 @@ object ReleasePlugin extends AutoPlugin {
     },
   
     releaseVersionBump := Version.Bump.default,
-    releaseCalcNextVersion := { ver =>
-      Version(ver)
-        .map(_.bump(releaseVersionBump.value)
-        .asSnapshot.string)
-        .getOrElse(versionFormatError)
+    releaseCalcNextSnapshotVersion := {
+      _
+        .bump(releaseVersionBump.value)
+        .asSnapshot
     },
     releaseUseGlobalVersion := true,
-    releaseCrossBuild := false,
 
-    releaseTagName := s"v${(version in ThisBuild).value}",
-    releaseTagComment := s"Releasing ${(version in ThisBuild).value}",
-    versionChangeCommitMessage := s"Setting version to ${(version in ThisBuild).value}",
+    releaseCalcTag := { v => (s"v$v",s"Release $v") },
+    releaseCalcVersionChangeCommitMessage := { v => s"Setting version to $v" },
 
     releaseVersionFile := file("version.sbt"),
 
     releasePublishArtifactsAction := publish.value,
 
-    releaseCreateProcess := Seq[ReleaseStep](
-      ensureNoReleaseBranch,
-      ensureStagingClean,
-      ensureCurrentBranch(_.extract.get(gitflowDevelopBranchName)),
-      ensureNotBehindRemote,
-      runClean,
-      runUpdate,
-      runTest,
-      setReleaseBranch(calcReleaseBranchName),
-      checkoutNewBranch(getReleaseBranch),
-      checkoutBranch(_.extract.get(gitflowDevelopBranchName)),
-      calcNextSnapshotVersion,
-      updateVersionFile(getUpdatedVersion),
-      setVersion(getUpdatedVersion),
-      addAndCommitAll(
-        commitMessage = calcVersionChangeCommitMessage
-      ),
-      pushAllpushTags,
-      publishArtifacts,
-      // Note: end this command on the release branch to allow immediately executing close command
-      checkoutBranch(getReleaseBranch)
-    ),
+    releaseCreateSteps := { cfg =>
+      import cfg._
+      val helper = new Helper(cfg)
+      import helper._
+      
+      ensureNoReleaseBranch()
+      ensureStagingClean()
+      ensureCurrentBranch(developBranch)
+      ensureNoReleaseBranch()
+      
+      for {
+        _ <- runClean()
+        _ <- runUpdate()
+        _ <- runTest()
+        nextSnapshotVersion = calcNextSnapshotVersion(currentVersion)
+        releaseBranch = calcReleaseBranch(currentVersion)
+        _ = checkoutNewBranch(releaseBranch)
+        _ = checkoutBranch(developBranch)
+        updatedVersion = suggestNextSnapshotVersion(
+          nextSnapshotVersion
+        )
+        _ = updateVersionFile(updatedVersion)
+        _ <- setVersion(updatedVersion)
+        _ = addAndCommitVersionFile(
+          commitMessage = calcVersionChangeCommitMessage(updatedVersion)
+        )
+        _ = pushBranch(developBranch)
+        _ <- runPublish()
+        // Note: end this command on the release branch to allow immediately executing close command
+        _ = checkoutBranch(releaseBranch)
+      } yield ()
+    },
 
-    releaseCloseProcess := Seq[ReleaseStep](
-      ensureStagingClean,
-      setReleaseBranch(
-        findReleaseBranch(searchRemote = false).andThen(_.getOrElse(sys.error("Could not find release branch!")))
-      ),
-      ensureCurrentBranch(getReleaseBranch),
-      ensureNotBehindRemote,
-      checkSnapshotDependencies,
-      runClean,
-      runUpdate,
-      runTest,
-      calcReleaseVersion,
-      updateVersionFile(getUpdatedVersion),
-      setVersion(getUpdatedVersion),
-      addAndCommitAll(
-        commitMessage = calcVersionChangeCommitMessage
-      ),
-      checkoutBranch(_.extract.get(gitflowMasterBranchName)),
-      mergeBranch(
-        branch = getReleaseBranch,
-        flags = Seq("--no-ff","--strategy-option","theirs")
-      ),
-      tagRelease,
-      pushAllpushTags,
-      deleteLocalAndRemoteBranch(getReleaseBranch),
-      publishArtifacts
-    ),
+    releaseCloseSteps := { cfg:Config =>
+      import cfg._
+      val helper = new Helper(cfg)
+      import helper._
 
-    commands ++= Seq(releaseCreateCommand,releaseCloseCommand)
+      ensureStagingClean()
+      val releaseBranch = findReleaseBranch(searchRemote = false).getOrDie("Could not find release branch!")
+      ensureCurrentBranch(releaseBranch)
+      ensureNotBehindRemote()
+      checkSnapshotDependencies()
+      val releaseVersion = currentVersion.withoutQualifier
+      for {
+        _ <- runClean()
+        _ <- runUpdate()
+        _ <- runTest()
+        _ = updateVersionFile(releaseVersion)
+        _ <- setVersion(releaseVersion)
+        _ = addAndCommitVersionFile(
+          commitMessage = calcVersionChangeCommitMessage(releaseVersion)
+        )
+        _ = checkoutBranch(masterBranch)
+        _ = mergeBranch(
+          branchName = releaseBranch,
+          flags = Seq("--no-ff","--strategy-option","theirs")
+        )
+        (tagName,tagComment) = calcTag(releaseVersion)
+        _ = tag(tagName,tagComment)
+        _ = pushBranch(masterBranch)
+        _ = pushBranch(releaseBranch)
+        _ = pushTag(tagName)
+        _ = deleteLocalAndRemoteBranch(releaseBranch)
+        _ <- runPublish()
+      } yield ()
+    },
+    commands ++= Seq(
+      releaseCreateCommand,
+      releaseCloseCommand,
+      releaseAbortCommand
+    )
   )
 }

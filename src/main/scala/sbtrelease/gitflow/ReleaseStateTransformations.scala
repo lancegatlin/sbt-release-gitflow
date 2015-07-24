@@ -2,11 +2,9 @@ package sbtrelease.gitflow
 
 import sbt.Aggregation.KeyValue
 import sbt.Keys._
-import sbt.Package.ManifestAttributes
 import sbt._
 import sbt.std.Transform.DummyTaskMap
 import sbtrelease._
-import sbtrelease.gitflow.ReleasePlugin.autoImport.ReleaseKeys._
 import sbtrelease.gitflow.ReleasePlugin.autoImport._
 
 import scala.annotation.tailrec
@@ -14,10 +12,11 @@ import scala.annotation.tailrec
 object ReleaseStateTransformations {
   import Utilities._
 
+  // TODO: get rid of me
   private def runTaskAggregated[T](taskKey: TaskKey[T], state: State): (State, Result[Seq[KeyValue[T]]]) = {
     import EvaluateTask._
     val extra = DummyTaskMap(Nil)
-    val extracted = state.extract
+    val extracted = Project.extract(state)
     val config = extractedTaskConfig(extracted, extracted.structure, state)
 
     val rkey = Utilities.resolve(taskKey.scopedKey, extracted)
@@ -34,402 +33,332 @@ object ReleaseStateTransformations {
     (newS, result)
   }
 
+  class Helper(
+    val cfg: Config
+  ) {
+    import cfg._
+    import args._
+    import log._
+    
+    val git = Git
+        .detect(baseDirectory,isDryRun)(cfg.log)
+        .getOrDie("Working directory is not a git repository")
 
-  lazy val checkSnapshotDependencies: ReleaseStep = { st: State =>
-    st.log.info("Checking for SNAPSHOT dependencies...")
-    val thisRef = st.extract.get(thisProjectRef)
-    val (newSt, result) = runTaskAggregated(releaseSnapshotDependencies in thisRef, st)
-    val snapshotDeps = result match {
-      case Value(value) => value.flatMap(_.value)
-      case Inc(cause) => sys.error("Error checking for snapshot dependencies: " + cause)
+    def ensureStagingClean() : Unit = {
+      info("Ensuring staging is clean... ")
+  
+      if (git.status.nonEmpty) {
+        die("Working directory is dirty.")
+      }
+      
+      info("Starting release process off commit: " + git.currentHash)
     }
-    if (snapshotDeps.nonEmpty) {
-      val useDefaults = extractDefault(newSt, "n")
-      st.log.warn("Snapshot dependencies detected:\n" + snapshotDeps.mkString("\n"))
-      useDefaults orElse SimpleReader.readLine("Do you want to continue (y/n)? [n] ") match {
-        case Yes() =>
-        case _ => sys.error("Aborting release due to snapshot dependencies.")
+    
+    def findReleaseBranch(searchRemote: Boolean) : Option[String] = {
+      val branches = git.allBranches
+      val result =
+        if(searchRemote) {
+          branches.find(_.contains("release/"))
+        } else {
+          branches.find(_.startsWith("release/"))
+        }
+      result match {
+        case s@Some(releaseBranch) =>
+          info(s"Found release branch $releaseBranch")
+        case _ =>
+      }
+      result
+    }
+
+    def ensureNoReleaseBranch() : Unit = {
+      info("Ensuring no release branch is already present... ")
+      findReleaseBranch(searchRemote = true) match {
+        case Some(releaseBranch) =>
+          die(s"Release branch already exists: $releaseBranch")
+        case _ =>
       }
     }
-    newSt
-  }
+    
+    def ensureNotBehindRemote() : Unit = {
+      info("Ensuring not behind remote...")
+      // Note: throws exception if not tracking
+      git.trackingRemote
 
-  // TODO:
-//  lazy val removeSnapshotDependencies: ReleaseStep = { st: State =>
-//    val thisRef = st.extract.get(thisProjectRef)
-//    val (newSt, result) = runTaskAggregated(releaseSnapshotDependencies in thisRef, st)
-//    val snapshotDeps = result match {
-//      case Value(value) => value.flatMap(_.value)
-//      case Inc(cause) => sys.error("Error checking for snapshot dependencies: " + cause)
-//    }
-//    if (snapshotDeps.nonEmpty) {
-//      val useDefaults = extractDefault(newSt, "n")
-//      st.log.warn("Snapshot dependencies detected:\n" + snapshotDeps.mkString("\n"))
-//      useDefaults orElse SimpleReader.readLine("Do you want to continue (y/n)? [n] ") match {
-//        case Yes() =>
-//        case _ => sys.error("Aborting release due to snapshot dependencies.")
-//      }
-//    }
-//    newSt
-//  }
+      if(git.isBehindRemote) {
+        die("Upstream has unmerged commits")
+      }
+    }
+    
+    def ensureCurrentBranch(branchName: String) : Unit = {
+      if(!isDryRun) {
+        info(s"Ensuring current branch is $branchName...")
+        if(git.currentBranch != branchName) {
+          die(s"Must be started from branch $branchName")
+        }
+      }
+    }
 
-  lazy val runClean : ReleaseStep = ReleaseStep(
-    action = { st: State =>
-      if (
-        !st.get(skipTests).getOrElse(false) ||
-        !st.get(skipPublish).getOrElse(false)
-      ) {
-        st.log.info("Running clean....")
-        val extracted = Project.extract(st)
+    def checkoutBranch(branchName: String) : Unit = {
+      info(s"Checking out $branchName...")
+  
+      if (!git.checkout(branchName)) {
+        die(s"Failed to checkout $branchName branch")
+      }
+    }
+    
+    def runClean() = Step.unit { s1 =>
+      if (!skipTests || !skipPublish) {
+        info("Running clean....")
+        val extracted = Project.extract(s1)
         val ref = extracted.get(thisProjectRef)
-        extracted.runAggregated(clean in Global in ref, st)
+        val s2 = extracted.runAggregated(clean in Global in ref, s1)
+        s2
       } else {
-        st.log.info("Skipping clean...")
-        st
+        info("Skipping clean...")
+        s1
       }
     }
-  )
-
-  lazy val runUpdate: ReleaseStep = ReleaseStep(
-    action = { st: State =>
+    
+    def runUpdate() = Step.unit { s1 =>
       if (
         // Only need to run update if skipping tests but still publishing
         // (test will perform update)
-        st.get(skipTests).getOrElse(false) &&
-        !st.get(skipPublish).getOrElse(false)
+        skipTests && !skipPublish
       ) {
-        st.log.info("Running update...")
-        val extracted = Project.extract(st)
+        info("Running update...")
+        val extracted = Project.extract(s1)
         val ref = extracted.get(thisProjectRef)
-        extracted.runAggregated(update in Global in ref, st)
+        val s2 = extracted.runAggregated(update in Global in ref, s1)
+        s2
       } else {
-        st.log.info("Skipping update...")
-        st
+        info("Skipping update...")
+        s1
       }
-    },
-    enableCrossBuild = true
-  )
-
-  lazy val runTest: ReleaseStep = ReleaseStep(
-    action = { st: State =>
-      if (!st.get(skipTests).getOrElse(false)) {
-        st.log.info("Running tests...")
-        val extracted = Project.extract(st)
+    }
+    
+    def runTest() = Step.unit { s1: State =>
+      if(skipTests) {
+        info("Running tests...")
+        val extracted = Project.extract(s1)
         val ref = extracted.get(thisProjectRef)
-        extracted.runAggregated(test in Test in ref, st)
+        val s2 = extracted.runAggregated(test in Test in ref, s1) 
+        s2
       } else {
-        st.log.info("Skipping running tests...")
-        st
+        info("Skipping running tests...")
+        s1
       }
-    },
-    enableCrossBuild = true
-  )
-
-
-  val calcNextSnapshotVersion : ReleaseStep = { st:State =>
-    val extracted = Project.extract(st)
-
-    val useDefs = st.get(useDefaults).getOrElse(false)
-    val currentV = extracted.get(version)
-
-    val nextFunc = extracted.get(releaseCalcNextVersion)
-    val suggestedNextV = nextFunc(currentV)
-    val nextV = readVersion(suggestedNextV, "Next SNAPSHOT version [%s] : ", useDefs)
+    }
     
-    st.put(updatedVersion, nextV)
-  }
-
-  val calcReleaseVersion : ReleaseStep = { st:State =>
-    val useDefs = st.get(useDefaults).getOrElse(false)
-
-    val suggestedReleaseV = getReleaseBranch.andThen(_.drop("release/".length))(st)
-    val nextV = readVersion(suggestedReleaseV, "Set release version (dropped -SNAPSHOT) [%s] : ", useDefs)
-    
-    st.put(updatedVersion, nextV)
-  }
-
-  def setVersion(newVersion: State => String) : ReleaseStep = { st:State =>
-    val nv = newVersion(st)
-    st.log.info(s"Setting current version to $nv")
-    val useGlobal = st.extract.get(releaseUseGlobalVersion)
-
-    reapply(Seq(
-      if (useGlobal) version in ThisBuild := nv
-      else version := nv
-    ), st)
-  }
-
-  def getUpdatedVersion = { st:State =>
-    st.get(updatedVersion).getOrElse(sys.error("Aborting updatedVersion is not set!"))
-  }
-
-  def updateVersionFile(newVersion: State => String) : ReleaseStep = { st: State =>
-    val v = newVersion(st)
-    st.log.info(s"Updating version file to $v")
-    val useGlobal = st.extract.get(releaseUseGlobalVersion)
-    val versionStr = (if (useGlobal) globalVersionString else versionString) format v
-    val file = st.extract.get(releaseVersionFile)
-    val isDryRun = st.get(dryRun).getOrElse(false)
-    if(!isDryRun) {
-      IO.write(file, versionStr + "\n")
+    def checkoutNewBranch(branchName: String) : Unit = {
+      info(s"Creating branch $branchName...")
+      val defaultChoice = if(useDefs) Some("y") else None
+      defaultChoice orElse SimpleReader.readLine(s"Create branch $branchName (y/n)? [y] ") match {
+        case Some("y") | Some("") =>
+        case _ => die("Declined release branch creation")
+      }
+  
+      val remote = git.trackingRemote
+      git.checkoutNewBranch(branchName)
+      git.pushSetUpstream(remote)
     }
-    st
-  }
-
-  def git(st: State): Git = {
-    val isDryRun = st.get(dryRun).getOrElse(false)
-    Git.detect(st.extract.get(baseDirectory),isDryRun)(st.log) match {
-      case None =>
-        sys.error("Working directory is not a git repository")
-      case Some(git) => git
-    }
-  }
-
-   lazy val ensureStagingClean : ReleaseStep = { st: State =>
-     st.log.info("Ensuring staging is clean... ")
-
-     val status = git(st).status
-    if (status.nonEmpty) {
-      sys.error("Working directory is dirty.")
+  
+    def suggestNextSnapshotVersion(suggested: Version) : Version = {
+      readVersion(suggested, "Next SNAPSHOT version [%s] : ", useDefs)
     }
 
-    st.log.info("Starting release process off commit: " + git(st).currentHash)
-    st
-  }
-
-  def findReleaseBranch(searchRemote: Boolean = false) = {st:State =>
-    val branches = git(st).allBranches
-    val result =
-      if(searchRemote) {
-        branches.find(_.contains("release/"))
+    def updateVersionFile(newVersion: Version) : Unit = {
+      info(s"Updating version file to $newVersion")
+      val versionStr = if(useGlobal) {
+        s"""version in ThisBuild := "$newVersion""""
       } else {
-        branches.find(_.startsWith("release/"))
+        s"""version := "$newVersion""""
       }
-    result match {
-      case s@Some(releaseBranch) =>
-        st.log.info(s"Found release branch $releaseBranch")
-      case _ =>
-    }
-    result
-  }
-
-  def setReleaseBranch(branch: State => String) : ReleaseStep = { st: State =>
-    val bname = branch(st)
-    st.log.info(s"Setting release branch to $bname")
-    st.put(gitflowReleaseBranchName, bname)
-  }
-
-  def getReleaseBranch = { st:State =>
-    st.get(gitflowReleaseBranchName).getOrElse(sys.error("Release branch name not set!"))
-  }
-
-  lazy val ensureNoReleaseBranch : ReleaseStep = { st: State =>
-    st.log.info("Ensuring no release branch is already present... ")
-    findReleaseBranch(searchRemote = true)(st) match {
-      case Some(releaseBranch) =>
-        sys.error(s"Release branch already exists: $releaseBranch")
-      case _ =>
-    }
-    st
-  }
-
-  lazy val ensureNotBehindRemote : ReleaseStep = { st: State =>
-    st.log.info("Ensuring not behind remote...")
-    // Note: throws exception if not tracking
-    git(st).trackingRemote
-
-    if (git(st).isBehindRemote) {
-      sys.error("Upstream has unmerged commits (suggested fix: git pull)")
-    }
-    st
-  }
-
-  def ensureCurrentBranch(branchName: State => String) : ReleaseStep = { st:State =>
-    val isDryRun = st.get(dryRun).getOrElse(false)
-    if(!isDryRun) {
-      val bname = branchName(st)
-      st.log.info(s"Ensuring current branch is $bname...")
-      if(git(st).currentBranch != bname) {
-        sys.error(s"Must be started from branch $bname")
+      if(!isDryRun) {
+        IO.write(versionFile, versionStr + "\n")
       }
-      st
-    } else {
-      st
     }
-  }
   
-  def checkoutBranch(branchName: State => String) : ReleaseStep = { st: State =>
-
-    val bname = branchName(st)
-    st.log.info(s"Checking out $bname...")
-
-    if (!git(st).checkout(bname)) {
-      sys.error(s"Failed to checkout $bname branch")
-    }
-    st
-  }
-
-  def calcNonSnapshotVersion = { st:State =>
-    val snapshotVersion = st.extract.get(version)
-    if(snapshotVersion.endsWith("-SNAPSHOT")) {
-      snapshotVersion.dropRight("-SNAPSHOT".length)
-    } else {
-      sys.error(s"Current snapshotVersion $version must end with '-SNAPSHOT'.")
-    }
-  }
-
-  def calcReleaseBranchName = { st: State =>
-    val calcReleaseBranchName = st.extract.get(calcGitflowReleaseBranchName)
-    val nonSnapshotVersion = calcNonSnapshotVersion(st)
-    calcReleaseBranchName(nonSnapshotVersion)
-  }
-
-  def checkoutNewBranch(branchName: State => String) : ReleaseStep = { st: State =>
-    val bname = branchName(st)
-    st.log.info(s"Creating branch $bname...")
-    val defaultChoice = extractDefault(st, "y")
-    defaultChoice orElse SimpleReader.readLine(s"Create branch $bname (y/n)? [y] ") match {
-      case Yes() | Some("") =>
-      case _ => sys.error("Declined release branch creation")
-    }
-
-    val vc = git(st)
-    val remote = vc.trackingRemote
-    vc.checkoutNewBranch(bname)
-    vc.pushSetUpstream(remote)
-    st
-  }
+    def setVersion(newVersion: Version) = Step.unit { s1:State =>
+      info(s"Setting current version to $newVersion")
   
-  def calcVersionChangeCommitMessage = { st:State =>
-    val (_,msg) = st.extract.runTask(versionChangeCommitMessage, st)
-    msg
-  }
-  
-  def addAndCommitAll(commitMessage: State => String) : ReleaseStep = { st: State =>
-    val cm = commitMessage(st)
-    st.log.info(s"Adding all changes and committing with message: '$cm'")
-    git(st).add(".")
-    git(st).commit(cm)
-    st
-  }
-
-  lazy val pushAllpushTags : ReleaseStep = { st:State =>
-    val defaultChoice = extractDefault(st, "y")
-
-    val vc = git(st)
-    if (vc.hasUpstream) {
-      defaultChoice orElse SimpleReader.readLine("Push all changes (and tags) to the remote repository (y/n)? [y] ") match {
-        case Yes() | Some("") =>
-          git(st).pushAll
-          git(st).pushTags
-        case _ => st.log.warn("Remember to push the changes yourself!")
-      }
-    } else {
-      st.log.info(s"Changes were NOT pushed, because no upstream branch is configured for the local branch [${git(st).currentBranch}]")
+      val s2 = reapply(Seq(
+        if (useGlobal) version in ThisBuild := newVersion.toString
+        else version := newVersion.toString
+      ), s1)
+      
+      s2
     }
-    st
-  }
+    
+    def addAndCommitVersionFile(commitMessage: String) : Unit = {
+      info(s"Adding $versionFile and committing with message: '$commitMessage'")
+      git.add(versionFile.toString)
+      git.commit(commitMessage)
+    }
 
-  def deleteLocalAndRemoteBranch(getBranch: State => String) : ReleaseStep = { st:State =>
-    val branch = getBranch(st)
-    st.log.info(s"Deleting branch $branch...")
-
-    val defaultChoice = extractDefault(st, "y")
-    val vc = git(st)
-      defaultChoice orElse SimpleReader.readLine(s"Delete branch $branch (y/n)? [y] ") match {
-        case Yes() | Some("") =>
-          val remote = vc.trackingRemote(branch)
-          vc.deleteLocalBranch(branch)
-          vc.deleteRemoteBranch(remote, branch)
-        case _ =>
-      }
-    st
-  }
-
-  lazy val tagRelease: ReleaseStep = { st: State =>
-    val defaultChoice = extractDefault(st, "a")
-    st.log.info("Tagging release...")
-
-    @tailrec
-    def findTag(tag: String): Option[String] = {
-      if (git(st).tagExists(tag)) {
-        defaultChoice orElse SimpleReader.readLine("Tag [%s] exists! Overwrite, keep or abort or enter a new tag (o/k/a)? [a] " format tag) match {
-          case Some("" | "a" | "A") =>
-            sys.error("Tag [%s] already exists. Aborting release!" format tag)
-
-          case Some("k" | "K") =>
-            st.log.warn("The current tag [%s] does not point to the commit for this release!" format tag)
-            None
-
-          case Some("o" | "O") =>
-            st.log.warn("Overwriting a tag can cause problems if others have already seen the tag (see `%s help tag`)!" format git(st).commandName)
-            Some(tag)
-
-          case Some(newTag) =>
-            findTag(newTag)
-
-          case None =>
-            sys.error("No tag entered. Aborting release!")
+    def pushBranch(branchName: String) : Unit = {
+      val defaultChoice = if(useDefs) Some("y") else None
+      if (git.hasUpstream) {
+        defaultChoice orElse SimpleReader.readLine(s"Push branch $branchName to the remote repository (y/n)? [y] ") match {
+          case Some("y") | Some("") =>
+            git.pushBranch(branchName)
+          case _ => warn("Remember to push the changes yourself!")
         }
       } else {
-        Some(tag)
+        die(s"No upstream branch is configured for the local branch $branchName")
+      }
+    }
+  
+    def pushTag(tagName: String) : Unit = {
+      val defaultChoice = if(useDefs) Some("y") else None
+      defaultChoice orElse SimpleReader.readLine(s"Push tag $tagName to the remote repository (y/n)? [y] ") match {
+        case Some("y") | Some("") =>
+          git.pushTag(tagName)
+        case _ => warn("Remember to push the changes yourself!")
       }
     }
 
-    val (tagState, tag) = st.extract.runTask(releaseTagName, st)
-    val (commentState, comment) = st.extract.runTask(releaseTagComment, tagState)
-    val tagToUse = findTag(tag)
-    tagToUse.foreach(git(commentState).tag(_, comment, force = true))
-
-    tagToUse map (t =>
-      reapply(Seq[Setting[_]](
-        packageOptions += ManifestAttributes("Vcs-Release-Tag" -> t)
-      ), commentState)
-    ) getOrElse commentState
-  }
-
-  lazy val publishArtifacts = ReleaseStep(
-    action = runPublishArtifactsAction,
-    check = st => {
-      // getPublishTo fails if no publish repository is set up.
-      val ex = st.extract
-      val ref = ex.get(thisProjectRef)
-      Classpaths.getPublishTo(ex.get(publishTo in Global in ref))
-      st
-    },
-    enableCrossBuild = true
-  )
-   lazy val runPublishArtifactsAction = { st: State =>
-     if (!st.get(skipPublish).getOrElse(false)) {
-       st.log.info("Publishing artifacts...")
-       val extracted = st.extract
+    def runPublish() = Step.unit { st =>
+     if (!skipPublish) {
+       info("Publishing artifacts...")
+       val extracted = Project.extract(st)
        val ref = extracted.get(thisProjectRef)
-       extracted.runAggregated(releasePublishArtifactsAction in Global in ref, st)
+       // getPublishTo fails if no publish repository is set up.
+       Classpaths.getPublishTo(extracted.get(publishTo in Global in ref))
+       val s2 = extracted.runAggregated(releasePublishArtifactsAction in Global in ref, st)
+       s2
      } else {
-       st.log.info("Skipping publishing artifacts...")
+       info("Skipping publishing artifacts...")
        st
      }
-  }
+    }
+  
+    def checkSnapshotDependencies() = Step.unit { st: State =>
+      info("Checking for SNAPSHOT dependencies...")
+      val e = Project.extract(st)
+      val thisRef = e.get(thisProjectRef)
+      val (newSt, result) = runTaskAggregated(releaseSnapshotDependencies in thisRef, st)
+      val snapshotDeps = result match {
+        case Value(value) => value.flatMap(_.value)
+        case Inc(cause) => sys.error("Error checking for snapshot dependencies: " + cause)
+      }
+      if (snapshotDeps.nonEmpty) {
+        val useDefaults = if(useDefs) Some("n") else None
+        warn("Snapshot dependencies detected:\n" + snapshotDeps.mkString("\n"))
+        useDefaults orElse SimpleReader.readLine("Do you want to continue (y/n)? [n] ") match {
+          case Some("y") =>
+          case _ => sys.error("Aborting release due to snapshot dependencies.")
+        }
+      }
+      newSt
+    }
 
-  def mergeBranch(branch: State => String, flags: Seq[String] = Nil) : ReleaseStep = { st:State =>
-    val bname = branch(st)
-    val _git = git(st)
-    st.log.info(s"Merging branch $bname to ${_git.currentBranch}" )
-    _git.merge(bname,flags)
-    st
-  }
+    def mergeBranch(branchName: String, flags: Seq[String] = Nil) : Unit = {
+      val currentBranch = git.currentBranch
+      info(s"Merging branch $branchName into $currentBranch" )
+      val defaultChoice = if(useDefs) Some("y") else None
+      defaultChoice orElse SimpleReader.readLine(s"Merge branch $branchName into $currentBranch (y/n) [y] ") match {
+        case Some("" | "y" | "Y") =>
+          git.merge(branchName,flags)
+        case _ =>
+          die("Merge declined")
+      }
+    }
+    
+    def tag(tagName: String, tagComment: String) : Unit = {
+      val defaultChoice = if(useDefs) Some("a") else None
+      info(s"Creating tag $tagName...")
 
-  def readVersion(ver: String, prompt: String, useDef: Boolean): String = {
+      @tailrec
+      def findTag(tag: String): String = {
+        if (git.tagExists(tag)) {
+          defaultChoice orElse SimpleReader.readLine(s"Tag [$tag] exists! (O)verwrite, (a)bort or enter a new tag (o/a/*)? [a] ") match {
+            case Some("" | "a" | "A") =>
+              die(s"Tag [$tag] already exists. Aborting release!")
+
+            case Some("o" | "O") =>
+              warn(s"Overwriting a tag can cause problems if others have already seen the tag (see `${git.commandName} help tag`)!")
+              tag
+
+            case Some(newTag) =>
+              findTag(newTag)
+
+            case None =>
+              die("No tag entered. Aborting release!")
+          }
+        } else {
+          tag
+        }
+      }
+      val pickedTag = findTag(tagName)
+      git.tag(pickedTag,tagComment,force = true)
+    }
+
+    def deleteLocalAndRemoteBranch(branch: String) : Unit = {
+      info(s"Deleting branch $branch...")
+
+      val defaultChoice = if(useDefs) Some("y") else None
+      defaultChoice orElse SimpleReader.readLine(s"Delete branch $branch (y/n)? [y] ") match {
+        case Some("y") | Some("") =>
+          val remote = git.trackingRemote(branch)
+          git.deleteLocalBranch(branch)
+          git.deleteRemoteBranch(remote, branch)
+        case _ =>
+      }
+    }
+
+  }
+  
+
+
+//  def setReleaseBranch(branch: State => String) : ReleaseStep = { st: State =>
+//    val bname = branch(st)
+//    st.log.info(s"Setting release branch to $bname")
+//    st.put(gitflowReleaseBranchName, bname)
+//  }
+
+//  def getReleaseBranch = { st:State =>
+//    st.get(gitflowReleaseBranchName).getOrElse(sys.error("Release branch name not set!"))
+//  }
+
+
+  
+
+//
+//  def calcReleaseTagName = { st:State =>
+//    st.extract.runTask(releaseCalcTagName, st)
+//  }
+//
+//  def setReleaseTagName(tagName: State => String) = { st: State =>
+//    st.put(releaseTagName,tagName(st))
+//  }
+//
+//  def getReleaseTagName = { st: State =>
+//    st.get(releaseTagName).getOrElse("releaseTagName not set!")
+//  }
+//
+//
+//    val tagToUse = findTag(tname)
+//    tagToUse.foreach(vc.tag(_, tcomment, force = true))
+//
+//    tagToUse map (t =>
+//      reapply(Seq[Setting[_]](
+//        packageOptions += ManifestAttributes("Vcs-Release-Tag" -> t)
+//      ), st)
+//    ) getOrElse st
+//  }
+//
+
+  def readVersion(ver: Version, prompt: String, useDef: Boolean): Version = {
     if (useDef) ver
     else SimpleReader.readLine(prompt format ver) match {
       case Some("") => ver
-      case Some(input) => Version(input).map(_.string).getOrElse(versionFormatError)
+      case Some(input) => Version(input)
       case None => sys.error("No version provided!")
     }
   }
 
   def reapply(settings: Seq[Setting[_]], state: State): State = {
-    val extracted = state.extract
+    val extracted = Project.extract(state)
     import extracted._
 
     val append = Load.transformSettings(Load.projectScope(currentRef), currentRef.build, rootProject, settings)
