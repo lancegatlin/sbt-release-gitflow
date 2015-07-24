@@ -6,7 +6,8 @@ case class Args (
   isDryRun: Boolean,
   skipTests: Boolean,
   skipPublish: Boolean,
-  useDefs: Boolean
+  useDefs: Boolean,
+  skipIfExists: Boolean
 )
 object Args {
   def apply(args: Seq[String]) : Args = {
@@ -15,7 +16,8 @@ object Args {
       isDryRun = args.contains(DryRun),
       skipTests = args.contains(SkipTests),
       skipPublish = args.contains(SkipPublish),
-      useDefs = args.contains(WithDefaults)
+      useDefs = args.contains(WithDefaults),
+      skipIfExists = args.contains(SkipIfExists)
     )
   }
 }

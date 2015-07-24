@@ -70,15 +70,6 @@ object ReleaseStateTransformations {
       result
     }
 
-    def ensureNoReleaseBranch() : Unit = {
-      info("Ensuring no release branch is already present... ")
-      findReleaseBranch(searchRemote = true) match {
-        case Some(releaseBranch) =>
-          die(s"Release branch already exists: $releaseBranch")
-        case _ =>
-      }
-    }
-    
     def ensureNotBehindRemote() : Unit = {
       info("Ensuring not behind remote...")
       // Note: throws exception if not tracking
@@ -219,7 +210,8 @@ object ReleaseStateTransformations {
 
     def runPublish() = Step.unit { st =>
      if (!skipPublish) {
-       info("Publishing artifacts...")
+       val currentBranch = git.currentBranch
+       info(s"Publishing from branch $currentBranch...")
        val extracted = Project.extract(st)
        val ref = extracted.get(thisProjectRef)
        // getPublishTo fails if no publish repository is set up.

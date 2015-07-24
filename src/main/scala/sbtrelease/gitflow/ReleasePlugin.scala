@@ -35,11 +35,13 @@ object ReleasePlugin extends AutoPlugin {
       val DryRun = "dry-run"
       val SkipTests = "skip-tests"
       val SkipPublish = "skip-publish"
+      val SkipIfExists = "skip-if-exists"
       val releaseArgsParser = (
         Space ~> WithDefaults |
         Space ~> SkipTests |
         Space ~> SkipPublish |
-        Space ~> DryRun
+        Space ~> DryRun |
+        Space ~> SkipIfExists
       ).*.map(Args.apply)
       
       val releaseCreateCommand =
@@ -116,33 +118,61 @@ object ReleasePlugin extends AutoPlugin {
       import cfg._
       val helper = new Helper(cfg)
       import helper._
-      
-      ensureNoReleaseBranch()
+
       ensureStagingClean()
       ensureCurrentBranch(developBranch)
-      ensureNoReleaseBranch()
-      
-      for {
-        _ <- runClean()
-        _ <- runUpdate()
-        _ <- runTest()
-        nextSnapshotVersion = calcNextSnapshotVersion(currentVersion)
-        releaseBranch = calcReleaseBranch(currentVersion)
-        _ = checkoutNewBranch(releaseBranch)
-        _ = checkoutBranch(developBranch)
-        updatedVersion = suggestNextSnapshotVersion(
-          nextSnapshotVersion
-        )
-        _ = updateVersionFile(updatedVersion)
-        _ <- setVersion(updatedVersion)
-        _ = addAndCommitVersionFile(
-          commitMessage = calcVersionChangeCommitMessage(updatedVersion)
-        )
-        _ = pushBranch(developBranch)
-        _ <- runPublish()
-        // Note: end this command on the release branch to allow immediately executing close command
-        _ = checkoutBranch(releaseBranch)
-      } yield ()
+
+      log.info("Ensuring no release branch is already present... ")
+      findReleaseBranch(searchRemote = true) match {
+        case Some(releaseBranch) =>
+          if(args.skipIfExists) {
+            log.info(s"Release branch $releaseBranch already exists")
+            // Ensure its local and end command in release branch
+            checkoutBranch(releaseBranch)
+            for {
+              _ <- runClean()
+              _ <- runUpdate()
+              _ <- runTest()
+              _ <- runPublish()
+            } yield ()
+          } else {
+            die(s"Release branch already exists: $releaseBranch")
+          }
+        case _ =>
+
+          for {
+            // Run these before making changes to ensure everything is ok to release
+            _ <- runClean()
+            _ <- runUpdate()
+            _ <- runTest()
+            nextSnapshotVersion = calcNextSnapshotVersion(currentVersion)
+            releaseBranch = calcReleaseBranch(currentVersion)
+            updatedVersion = suggestNextSnapshotVersion(
+              nextSnapshotVersion
+            )
+            _ = {
+              // Create release branch
+              checkoutNewBranch(releaseBranch)
+              // Update develop branch with incremented version
+              checkoutBranch(developBranch)
+              updateVersionFile(updatedVersion)
+              addAndCommitVersionFile(
+                commitMessage = calcVersionChangeCommitMessage(updatedVersion)
+              )
+              pushBranch(developBranch)
+            }
+            _ <- setVersion(updatedVersion)
+            // Publish develop
+            _ <- runPublish()
+            // Note: end this command on the release branch to allow immediately executing close command
+            _ = checkoutBranch(releaseBranch)
+
+            _ <- setVersion(currentVersion)
+            // Publish release
+            _ <- runPublish()
+          } yield ()
+      }
+
     },
 
     releaseCloseSteps := { cfg:Config =>
@@ -157,25 +187,29 @@ object ReleasePlugin extends AutoPlugin {
       checkSnapshotDependencies()
       val releaseVersion = currentVersion.withoutQualifier
       for {
+        // Run these before making changes to ensure everything is ok to close
         _ <- runClean()
         _ <- runUpdate()
         _ <- runTest()
-        _ = updateVersionFile(releaseVersion)
-        _ <- setVersion(releaseVersion)
-        _ = addAndCommitVersionFile(
-          commitMessage = calcVersionChangeCommitMessage(releaseVersion)
-        )
-        _ = checkoutBranch(masterBranch)
-        _ = mergeBranch(
-          branchName = releaseBranch,
-          flags = Seq("--no-ff","--strategy-option","theirs")
-        )
         (tagName,tagComment) = calcTag(releaseVersion)
-        _ = tag(tagName,tagComment)
-        _ = pushBranch(masterBranch)
-        _ = pushBranch(releaseBranch)
-        _ = pushTag(tagName)
-        _ = deleteLocalAndRemoteBranch(releaseBranch)
+        _ = {
+          updateVersionFile(releaseVersion)
+          addAndCommitVersionFile(
+            commitMessage = calcVersionChangeCommitMessage(releaseVersion)
+          )
+          checkoutBranch(masterBranch)
+          mergeBranch(
+            branchName = releaseBranch,
+            flags = Seq("--no-ff","--strategy-option","theirs")
+          )
+          tag(tagName,tagComment)
+          pushBranch(masterBranch)
+          pushBranch(releaseBranch)
+          pushTag(tagName)
+          deleteLocalAndRemoteBranch(releaseBranch)
+        }
+        _ <- setVersion(releaseVersion)
+        // Publish final artifact from master
         _ <- runPublish()
       } yield ()
     },
