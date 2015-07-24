@@ -91,6 +91,9 @@ class Git(
   def checkout(branch: String) : Boolean =
     mutate("checkout","-q",branch).isEmpty
 
+  def checkoutRemote(remote: String, branch: String) : Boolean =
+    mutate("checkout","-b",branch,"--track",s"$remote/$branch")(errToInfoLogger).isEmpty
+
   private def revParse(name: String) : String =
     query("rev-parse", name).trim
 
@@ -121,8 +124,18 @@ class Git(
   def pushTag(tagName: String) : Unit =
     mutate("push",trackingRemote,tagName)(errToInfoLogger)
 
-  def allBranches : List[String] =
-    query("branch","-a").split('\n').map(_.substring(2)).toList
+//  def allBranches : List[String] =
+//    query("branch","-a").split('\n').map(_.substring(2)).toList
+
+  def localBranches : List[String] =
+    query("branch").split('\n').map(_.substring(2)).toList
+
+  val remoteBranchRegex = s"  (\\w+)/(.+)".r
+  def remoteBranches : List[(String,String)] =
+    query("branch","-r").split('\n').map {
+      case remoteBranchRegex(remote,branchName) =>
+        (remote,branchName)
+    }.toList
 
   def checkoutNewBranch(branch: String) : Unit =
     mutate("checkout","-q","-b",branch).trim

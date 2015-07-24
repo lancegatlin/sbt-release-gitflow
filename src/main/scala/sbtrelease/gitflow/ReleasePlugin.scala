@@ -128,7 +128,7 @@ object ReleasePlugin extends AutoPlugin {
           if(args.skipIfExists) {
             log.info("Skipping creating release branch")
             // Ensure release branch is local and end command in release branch
-            checkoutBranch(releaseBranch)
+            ensureBranchIsLocalAndCheckout(releaseBranch)
             for {
               _ <- runClean()
               _ <- runUpdate()

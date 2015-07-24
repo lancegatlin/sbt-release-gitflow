@@ -56,13 +56,15 @@ object ReleaseStateTransformations {
     }
     
     def findReleaseBranch(searchRemote: Boolean) : Option[String] = {
-      val branches = git.allBranches
       val result =
-        if(searchRemote) {
-          branches.find(_.contains("release/"))
-        } else {
-          branches.find(_.startsWith("release/"))
+        git.localBranches.find(_.startsWith("release/")) orElse {
+          if(searchRemote) {
+            git.remoteBranches.find(_._2.startsWith("release/")).map(_._2)
+          } else {
+            None
+          }
         }
+
       result match {
         case s@Some(releaseBranch) =>
           info(s"Found release branch $releaseBranch")
@@ -140,7 +142,21 @@ object ReleaseStateTransformations {
         s1
       }
     }
-    
+
+    def ensureBranchIsLocalAndCheckout(branchName: String) : Unit = {
+      info(s"Ensuring $branchName is local...")
+
+      if(git.localBranches.contains(branchName)) {
+        val remote = git.trackingRemote(branchName)
+        git.checkout(branchName)
+        info(s"Checked out local branch $branchName tracking $remote/$branchName")
+      } else {
+        val remote = git.remoteBranches.find(_._2 == branchName).getOrDie(s"Could not find remote branch $branchName")._1
+        git.checkoutRemote(remote,branchName)
+        info(s"Checked out $branchName locally tracking $remote/$branchName")
+      }
+    }
+
     def checkoutNewBranch(branchName: String) : Unit = {
       info(s"Creating branch $branchName...")
       val defaultChoice = if(useDefs) Some("y") else None
