@@ -69,13 +69,15 @@ object ReleasePlugin extends AutoPlugin {
           val helper = new Helper(cfg)
           import helper._
 
-          val releaseBranch =
-            findReleaseBranch(searchRemote = true)
-              .getOrDie("Could not find release branch!")
-          // Checkout in case its only on remote
-          checkoutBranch(releaseBranch)
-          checkoutBranch(developBranch)
-          deleteLocalAndRemoteBranch(releaseBranch)
+          findReleaseBranch(searchRemote = true) match {
+            case Some(releaseBranch) =>
+              // Checkout in case its only on remote
+              checkoutBranch(releaseBranch)
+              checkoutBranch(developBranch)
+              deleteLocalAndRemoteBranch(releaseBranch)
+            case None =>
+              log.info(s"No release to abort")
+          }
           s1
         }
     }
