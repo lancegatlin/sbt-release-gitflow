@@ -2,6 +2,7 @@ package sbtrelease.gitflow
 
 import sbt.Aggregation.KeyValue
 import sbt.Keys._
+import sbt.Package.ManifestAttributes
 import sbt._
 import sbt.std.Transform.DummyTaskMap
 import sbtrelease._
@@ -128,7 +129,7 @@ object ReleaseStateTransformations {
     }
     
     def runTest() = Step.unit { s1: State =>
-      if(skipTests) {
+      if(!skipTests) {
         info("Running tests...")
         val extracted = Project.extract(s1)
         val ref = extracted.get(thisProjectRef)
@@ -283,6 +284,11 @@ object ReleaseStateTransformations {
       }
       val pickedTag = findTag(tagName)
       git.tag(pickedTag,tagComment,force = true)
+
+// TODO:
+//      reapply(Seq[Setting[_]](
+//        packageOptions += ManifestAttributes("git-release-tag" -> pickedTag)
+//      ), st)
     }
 
     def deleteLocalAndRemoteBranch(branch: String) : Unit = {
@@ -299,46 +305,6 @@ object ReleaseStateTransformations {
     }
 
   }
-  
-
-
-//  def setReleaseBranch(branch: State => String) : ReleaseStep = { st: State =>
-//    val bname = branch(st)
-//    st.log.info(s"Setting release branch to $bname")
-//    st.put(gitflowReleaseBranchName, bname)
-//  }
-
-//  def getReleaseBranch = { st:State =>
-//    st.get(gitflowReleaseBranchName).getOrElse(sys.error("Release branch name not set!"))
-//  }
-
-
-  
-
-//
-//  def calcReleaseTagName = { st:State =>
-//    st.extract.runTask(releaseCalcTagName, st)
-//  }
-//
-//  def setReleaseTagName(tagName: State => String) = { st: State =>
-//    st.put(releaseTagName,tagName(st))
-//  }
-//
-//  def getReleaseTagName = { st: State =>
-//    st.get(releaseTagName).getOrElse("releaseTagName not set!")
-//  }
-//
-//
-//    val tagToUse = findTag(tname)
-//    tagToUse.foreach(vc.tag(_, tcomment, force = true))
-//
-//    tagToUse map (t =>
-//      reapply(Seq[Setting[_]](
-//        packageOptions += ManifestAttributes("Vcs-Release-Tag" -> t)
-//      ), st)
-//    ) getOrElse st
-//  }
-//
 
   def readVersion(ver: Version, prompt: String, useDef: Boolean): Version = {
     if (useDef) ver

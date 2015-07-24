@@ -125,9 +125,10 @@ object ReleasePlugin extends AutoPlugin {
       log.info("Ensuring no release branch is already present... ")
       findReleaseBranch(searchRemote = true) match {
         case Some(releaseBranch) =>
+          log.info(s"Found release branch $releaseBranch")
           if(args.skipIfExists) {
-            log.info(s"Release branch $releaseBranch already exists")
-            // Ensure its local and end command in release branch
+            log.info("Skipping creating release branch")
+            // Ensure release branch is local and end command in release branch
             checkoutBranch(releaseBranch)
             for {
               _ <- runClean()
@@ -136,7 +137,7 @@ object ReleasePlugin extends AutoPlugin {
               _ <- runPublish()
             } yield ()
           } else {
-            die(s"Release branch already exists: $releaseBranch")
+            die(s"Unexpected release branch found: $releaseBranch")
           }
         case _ =>
 
