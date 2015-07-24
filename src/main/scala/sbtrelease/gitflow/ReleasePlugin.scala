@@ -35,13 +35,10 @@ object ReleasePlugin extends AutoPlugin {
       val DryRun = "dry-run"
       val SkipTests = "skip-tests"
       val SkipPublish = "skip-publish"
-      val CrossBuild = "cross"
-      val FailureCommand = "--failure--"
       val releaseArgsParser = (
         Space ~> WithDefaults |
         Space ~> SkipTests |
         Space ~> SkipPublish |
-        Space ~> CrossBuild |
         Space ~> DryRun
       ).*.map(Args.apply)
       
