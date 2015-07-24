@@ -125,7 +125,6 @@ object ReleasePlugin extends AutoPlugin {
       log.info("Ensuring no release branch is already present... ")
       findReleaseBranch(searchRemote = true) match {
         case Some(releaseBranch) =>
-          log.info(s"Found release branch $releaseBranch")
           if(args.skipIfExists) {
             log.info("Skipping creating release branch")
             // Ensure release branch is local and end command in release branch
