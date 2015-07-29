@@ -1,6 +1,7 @@
 package sbtrelease.gitflow
 
 import java.io.File
+import sbt.Level
 
 import sbt._
 
@@ -20,48 +21,56 @@ class Git(
   }
 
   protected val devnull = new ProcessLogger {
-    def info(s: => String) {}
-    def error(s: => String) {}
+    def info(s: => String): Unit = {
+      logger.debug(s"[devnull info] $s")
+    }
+    def error(s: => String): Unit = {
+      logger.debug(s"[devnull error] $s")
+    }
     def buffer[T](f: => T): T = f
   }
 
   private lazy val exec = executableName(commandName)
 
-  private def query(args: Any*)(implicit _logger: ProcessLogger) : String =
-    {
-      val cmds = exec +: args.map(_.toString)
-//      logger.info(s"-- ${cmds.map { c =>
-//        if(c.exists(_.isWhitespace)) {
-//          s"'$c'"
-//        } else {
-//          c
-//        }
-//      }.mkString(" ")}")
-
-      val p = Process(cmds,baseDir)
-      val buffer = new StringBuffer
-      val pr = p.run(BasicIO(buffer, Some(_logger), false))
-      pr.exitValue()
-      // Ignore non zero exit values for queries
-      pr.destroy()
-      buffer.toString
-    }
-
-  private def mutate(args: Any*)(implicit _logger: ProcessLogger) : String = {
+  private def exec(
+    logLevel: Level.Value,
+    _skip: Boolean,
+    args: Any*
+  )(implicit _logger: ProcessLogger) : String = {
     val cmds = exec +: args.map(_.toString)
-    logger.info(s"-- ${cmds.map { c =>
-      if(c.exists(_.isWhitespace)) {
+    val execStr = cmds.map { c =>
+      if (c.exists(_.isWhitespace)) {
         s"'$c'"
       } else {
         c
       }
-    }.mkString(" ")}")
-    if(!isDryRun) {
-      Process(cmds, baseDir) !! _logger
+    }.mkString(" ")
+
+    logger.log(logLevel, s"-- $execStr")
+
+    if(!_skip) {
+      val p = Process(cmds,baseDir)
+      val buffer = new StringBuffer
+      val pr = p.run(BasicIO(buffer, Some(_logger), false))
+      val exitCode = pr.exitValue()
+      if(exitCode != 0) {
+        logger.warn(s"[$execStr] Non-zero exit code => $exitCode")
+      }
+      pr.destroy()
+      val result = buffer.toString
+      result.split('\n').foreach(line => logger.debug(s"""[$execStr] => "$line""""))
+      result
     } else {
+      logger.debug(s"""[$execStr] => <dry-run>""")
       ""
     }
   }
+
+  private def query(args: Any*)(implicit _logger: ProcessLogger) : String =
+    exec(Level.Debug, false, args:_*)(_logger)
+
+  private def mutate(args: Any*)(implicit _logger: ProcessLogger) : String =
+    exec(Level.Info,isDryRun,args:_*)(_logger)
 
   def add(files: String*) : Unit =
     mutate(("add" +: files): _*)
