@@ -53,12 +53,13 @@ class Git(
       val buffer = new StringBuffer
       val pr = p.run(BasicIO(buffer, Some(_logger), false))
       val exitCode = pr.exitValue()
-      if(exitCode != 0) {
-        logger.warn(s"[$execStr] Non-zero exit code => $exitCode")
-      }
       pr.destroy()
       val result = buffer.toString
-      result.split('\n').foreach(line => logger.debug(s"""[$execStr] => "$line""""))
+      val resultLogLevel = if(exitCode != 0) Level.Error else Level.Debug
+      result.split('\n').foreach(line => logger.log(resultLogLevel, s"""[$execStr] => "$line""""))
+      if(exitCode != 0) {
+        sys.error(s"[$execStr] Non-zero exit code => $exitCode")
+      }
       result
     } else {
       logger.debug(s"""[$execStr] => <dry-run>""")
@@ -116,7 +117,7 @@ class Git(
     mutate("tag", "-a", name, "-m", comment, if(force) "-f" else "")
 
   def tagExists(name: String) : Boolean =
-    query("show-ref", "--tags", "--verify", "refs/tags/" + name)(devnull).nonEmpty
+    query("tag").split('\n').contains(name)
 
 //  def checkRemote(remote: String) : ProcessBuilder =
 //    fetch(remote)
