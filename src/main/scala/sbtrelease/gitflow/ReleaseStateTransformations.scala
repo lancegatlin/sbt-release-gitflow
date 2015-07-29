@@ -167,7 +167,11 @@ object ReleaseStateTransformations {
   
       val remote = git.trackingRemote
       git.checkoutNewBranch(branchName)
-      git.pushSetUpstream(remote)
+      if(!skipPush) {
+        git.pushSetUpstream(remote)
+      } else {
+        info(s"Skipping pushing new branch $branchName...")
+      }
     }
   
     def suggestNextSnapshotVersion(suggested: Version) : Version = {
@@ -204,12 +208,17 @@ object ReleaseStateTransformations {
     }
 
     def pushBranch(branchName: String) : Unit = {
-      val defaultChoice = if(useDefs) Some("y") else None
+      val defaultChoice = if(skipPush) {
+        Some("n")
+      } else {
+        if(useDefs) Some("y") else None
+      }
+
       if (git.hasUpstream) {
         defaultChoice orElse SimpleReader.readLine(s"Push branch $branchName to the remote repository (y/n)? [y] ") match {
           case Some("y") | Some("") =>
             git.pushBranch(branchName)
-          case _ => warn("Remember to push the changes yourself!")
+          case _ => warn(s"Skipping pushing branch $branchName...")
         }
       } else {
         die(s"No upstream branch is configured for the local branch $branchName")
@@ -217,11 +226,15 @@ object ReleaseStateTransformations {
     }
   
     def pushTag(tagName: String) : Unit = {
-      val defaultChoice = if(useDefs) Some("y") else None
+      val defaultChoice = if(skipPush) {
+        Some("n")
+      } else {
+        if(useDefs) Some("y") else None
+      }
       defaultChoice orElse SimpleReader.readLine(s"Push tag $tagName to the remote repository (y/n)? [y] ") match {
         case Some("y") | Some("") =>
           git.pushTag(tagName)
-        case _ => warn("Remember to push the changes yourself!")
+        case _ => warn(s"Skipping push tag $tagName...")
       }
     }
 
@@ -315,7 +328,11 @@ object ReleaseStateTransformations {
         case Some("y") | Some("") =>
           val remote = git.trackingRemote(branch)
           git.deleteLocalBranch(branch)
-          git.deleteRemoteBranch(remote, branch)
+          if(!skipPush) {
+            git.deleteRemoteBranch(remote, branch)
+          } else {
+            info(s"Skipping deleting remote branch $remote/$branch...")
+          }
         case _ =>
       }
     }

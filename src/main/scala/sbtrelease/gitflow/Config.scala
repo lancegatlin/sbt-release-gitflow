@@ -9,7 +9,7 @@ import ReleasePlugin.autoImport._
 
 case class Config(
   log: Logger,
-  args: Args,
+  args: Flags,
   useGlobal: Boolean,
   developBranch: String,
   masterBranch: String,
@@ -23,7 +23,7 @@ case class Config(
 )
 
 object Config {
-  def apply(e: Extracted, args: Args, log: Logger) : Config = {
+  def apply(e: Extracted, args: Flags, log: Logger) : Config = {
     val useGlobal = e.get(releaseUseGlobalVersion)
     val developBranch = e.get(gitflowDevelopBranchName)
     val masterBranch = e.get(gitflowMasterBranchName)

@@ -36,13 +36,15 @@ object ReleasePlugin extends AutoPlugin {
       val SkipTests = "skip-tests"
       val SkipPublish = "skip-publish"
       val SkipIfExists = "skip-if-exists"
+      val SkipPush = "skip-push"
       val releaseArgsParser = (
         Space ~> WithDefaults |
         Space ~> SkipTests |
         Space ~> SkipPublish |
         Space ~> DryRun |
-        Space ~> SkipIfExists
-      ).*.map(Args.apply)
+        Space ~> SkipIfExists |
+        Space ~> SkipPush
+      ).*.map(Flags.apply)
       
       val releaseCreateCommand =
         Command("releaseCreate")(_ => releaseArgsParser) { (s1,args) =>
