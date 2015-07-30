@@ -326,12 +326,12 @@ object ReleaseStateTransformations {
       val defaultChoice = if(useDefs) Some("y") else None
       defaultChoice orElse SimpleReader.readLine(s"Delete branch $branch (y/n)? [y] ") match {
         case Some("y") | Some("") =>
-          val remote = git.trackingRemote(branch)
           git.deleteLocalBranch(branch)
           if(!skipPush) {
+            val remote = git.trackingRemote(branch)
             git.deleteRemoteBranch(remote, branch)
           } else {
-            info(s"Skipping deleting remote branch $remote/$branch...")
+            info(s"Skipping deleting remote branch $branch...")
           }
         case _ =>
       }
