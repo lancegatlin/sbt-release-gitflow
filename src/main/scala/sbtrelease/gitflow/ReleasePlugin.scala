@@ -125,11 +125,12 @@ object ReleasePlugin extends AutoPlugin {
 
       ensureStagingClean()
       ensureCurrentBranch(developBranch)
+      ensureNotBehindRemote()
 
       log.info("Ensuring no release branch is already present... ")
       findReleaseBranch(searchRemote = true) match {
         case Some(releaseBranch) =>
-          if(args.skipIfExists) {
+          if(flags.skipIfExists) {
             log.info("Skipping creating release branch")
             // Ensure release branch is local and end command in release branch
             ensureBranchIsLocalAndCheckout(releaseBranch)
@@ -187,8 +188,16 @@ object ReleasePlugin extends AutoPlugin {
       ensureStagingClean()
       val releaseBranch = findReleaseBranch(searchRemote = false).getOrDie("Could not find release branch!")
       ensureCurrentBranch(releaseBranch)
-      ensureNotBehindRemote()
+      // If skipPush is set then there may not be a tracking remote for the release branch
+      // since create was probably called with skipPush
+      if(!flags.skipPush) {
+        ensureNotBehindRemote()
+      }
       checkSnapshotDependencies()
+      checkoutBranch(masterBranch)
+      ensureNotBehindRemote()
+      checkoutBranch(releaseBranch)
+
       val releaseVersion = currentVersion.withoutQualifier
       for {
         // Run these before making changes to ensure everything is ok to close

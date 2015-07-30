@@ -38,7 +38,7 @@ object ReleaseStateTransformations {
     val cfg: Config
   ) {
     import cfg._
-    import args._
+    import flags._
     import log._
     
     val git = Git
