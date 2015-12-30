@@ -4,4 +4,101 @@ v1,21-Jul-2015
 :blogpost-status: unpublished
 :blogpost-categories: scala
 
+== Warning
+Please note, I don't like, recommend or use gitflow outside my current job. It's dogmatic and will unnecessarily complicate your code base. If you have a choice, do something, anything other than gitflow. I only created this plugin because the current SBT gitflow plugin is woefully out of date. I needed to bring some sanity to my daily grind. "Abandon all hope ye who enter here"
+
 Based on https://github.com/sbt/sbt-release
+
+== Add to your project
+Create (or add to) project/plugins.sbt:
+[source,sbt,numbered]
+----
+addSbtPlugin("org.lancegatlin" % "sbt-release-gitflow" % "1.0.0-SNAPSHOT")
+----
+Add a new file, version.sbt in the root directory of your project:
+[source,sbt,numbered]
+----
+version in ThisBuild := "X.Y.Z-SNAPSHOT"
+----
+(Replace X,Y,Z above with your own versions)
+
+== Commands
+=== Create a new release
+==== Command: releaseCreate
+==== Overview:
+
+. Create a new gitflow release branch (release/X.Y.Z) 
+.. Note: release branch version will be the same as develop
+. Advance the version number of the develop branch '-SNAPSHOT' version
+. Push everything to origin
+. Compile, test and publish the develop branch with the new version number
+. Checkout the release branch
+. Compile, test and publish the release branch
+
+==== Command Options
+* with-defaults
+** Don't prompt for options, always pick the default. Used this when running in automation scripts.
+* dry-run
+** Don't actually do anything, but emit the git commands that will be fired
+* skip-tests
+** Don't run tests
+* skip-publish
+** Don't publish
+* skip-if-exists
+** Normally a fatal error occurrs if a release branch already exists. If this is set, checkout existing release branch and compile, test and publish it
+* skip-push
+** Don't push changes to origin
+
+=== Close release
+==== Command: releaseClose
+Note1: all fixes should be committed to the release branch prior to running this command
+Note2: all '-SNAPSHOT' dependencies must be manually removed from the SBT project prior to running this command
+
+==== Overview
+. Ensure no '-SNAPSHOT' dependencies are present in the SBT project
+. Compile and test the project
+. Remove '-SNAPSHOT' from version in version.sbt, commits change
+. Merge release branch into master branch
+. Tag commit 'vX.Y.Z'
+. Push everything to origin
+. Publish release now on master branch
+
+==== Command Options
+* with-defaults
+** Don't prompt for options, always pick the default. Used this when running in automation scripts.
+* dry-run
+** Don't actually do anything, but emit the git commands that will be fired
+* skip-tests
+** Don't run tests
+* skip-publish
+** Don't publish
+* skip-push
+** Don't push changes to origin
+
+=== Abort release
+==== Command: releaseAbort
+==== Overview
+. Find open release branch
+. Delete the branch locally and remotely
+
+==== Command Options
+* with-defaults
+** Don't prompt for options, always pick the default. Used this when running in automation scripts.
+* dry-run
+** Don't actually do anything, but emit the git commands that will be fired
+* skip-push
+** Don't push changes to origin
+
+== Build options
+These build options may be set in build.sbt (or other project Scala file):
+
+* releaseVersionBump
+** An instance of Bump trait that determines how a version string is incremented. Defaults to X.Y+1.Z
+* releaseCalcTagComment
+** A function that computes the git tag comment for a release version. Defaults to vX.Y.Z.
+* releaseCalcVersionChangeCommitMessage
+** A function that computes the git commit message for the release close commit. Defaults to 'Setting version to X.Y.Z'
+* releaseVersionFile
+** The file to write the version to. Defaults to version.sbt
+* calcGitflowReleaseBranchName
+** A function to compute the name of a release branch from the current version. Defaults to 'release/X.Y.Z'
