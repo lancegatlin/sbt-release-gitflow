@@ -29,7 +29,7 @@ Add a new file, version.sbt in the root directory of your project:
 ----
 version in ThisBuild := "X.Y.Z-SNAPSHOT"
 ----
-(Replace X,Y,Z above with your own versions)
+Replace X,Y,Z above with your own version. Versioning in this plugin is aligned with semantic versioning (major.minor.bugfix) with the addition of the '-SNAPSHOT' suffix used to indicate the current version. '-SNAPSHOT' is used by JAR tooling to indicate a jar that could change at any time. JARs without '-SNAPSHOT' are assumed to be immutable.
 
 == Commands
 === Create a new release
@@ -67,12 +67,12 @@ Note2: all '-SNAPSHOT' dependencies must be manually removed from the SBT projec
 ==== Overview
 . Ensure no '-SNAPSHOT' dependencies are present in the SBT project
 . Compile and test the project
-. Remove '-SNAPSHOT' from version in version.sbt, commits change
-. Merge release branch into master branch
+. Remove '-SNAPSHOT' from version in version.sbt, commit change
 . Tag commit 'vX.Y.Z'
+. Merge release branch into master branch
 . Delete release branch
 . Push everything to origin
-. Publish release now on master branch
+. Publish master branch
 
 ==== Command Options
 * with-defaults
@@ -113,3 +113,5 @@ These build options may be set in build.sbt (or other project Scala file):
 ** The file to write the version to. Defaults to version.sbt
 * calcGitflowReleaseBranchName
 ** A function to compute the name of a release branch from the current version. Defaults to 'release/X.Y.Z'
+
+Note: there are other finer grained undocumented options in https://github.com/lancegatlin/sbt-release-gitflow/blob/master/src/main/scala/sbtrelease/gitflow/ReleasePlugin.scala
