@@ -181,7 +181,7 @@ object Git {
 
   def isRepository(dir: File): Option[File] =
     if (new File(dir, markerDirectory).isDirectory) Some(dir)
-    else Option(dir.getParentFile).flatMap(isRepository)
+    else Option(dir.getAbsoluteFile.getParentFile).flatMap(isRepository)
 
   protected val markerDirectory = ".git"
 }
