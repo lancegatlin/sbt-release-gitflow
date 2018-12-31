@@ -55,11 +55,11 @@ object ReleaseStateTransformations {
       info("Starting release process off commit: " + git.currentHash)
     }
     
-    def findReleaseBranch(searchRemote: Boolean) : Option[String] = {
+    def findReleaseBranch(searchRemote: Boolean, artifactName: String) : Option[String] = {
       val result =
-        git.localBranches.find(_.startsWith("release/")) orElse {
+        git.localBranches.find(_.startsWith(s"release/${artifactName}")) orElse {
           if(searchRemote) {
-            git.remoteBranches.find(_._2.startsWith("release/")).map(_._2)
+            git.remoteBranches.find(_._2.startsWith(s"release/${artifactName}")).map(_._2)
           } else {
             None
           }
