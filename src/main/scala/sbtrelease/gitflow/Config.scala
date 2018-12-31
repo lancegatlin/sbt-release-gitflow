@@ -3,7 +3,7 @@ package sbtrelease.gitflow
 import java.io.File
 
 import sbt.{Extracted, Logger}
-import sbt.Keys.version
+import sbt.Keys.{name, version}
 import sbtrelease.Version
 import ReleasePlugin.autoImport._
 
@@ -19,7 +19,8 @@ case class Config(
   calcNextSnapshotVersion: Version => Version,
   calcVersionChangeCommitMessage: Version => String,
   calcTag: Version => (String,String),
-  versionFile: File
+  versionFile: File,
+  artifactName: String
 )
 
 object Config {
@@ -33,6 +34,7 @@ object Config {
     val calcVersionChangeCommitMessage = e.get(releaseCalcVersionChangeCommitMessage)
     val calcTag = e.get(releaseCalcTag)
     val versionFile = e.get(releaseVersionFile)
+    val artifactName = e.get(name)
 
     Config(
       log = log,
@@ -46,7 +48,8 @@ object Config {
       calcNextSnapshotVersion = calcNextSnapshotVersion,
       calcVersionChangeCommitMessage = calcVersionChangeCommitMessage,
       calcTag = calcTag,
-      versionFile = versionFile
+      versionFile = versionFile,
+      artifactName = artifactName
     )
   }
 }
