@@ -55,11 +55,11 @@ object ReleaseStateTransformations {
       info("Starting release process off commit: " + git.currentHash)
     }
     
-    def findReleaseBranch(searchRemote: Boolean) : Option[String] = {
+    def findReleaseBranch(searchRemote: Boolean, artifactName: String) : Option[String] = {
       val result =
-        git.localBranches.find(_.startsWith("release/")) orElse {
+        git.localBranches.find(_.startsWith(s"release/${artifactName}")) orElse {
           if(searchRemote) {
-            git.remoteBranches.find(_._2.startsWith("release/")).map(_._2)
+            git.remoteBranches.find(_._2.startsWith(s"release/${artifactName}")).map(_._2)
           } else {
             None
           }
@@ -326,13 +326,13 @@ object ReleaseStateTransformations {
       val defaultChoice = if(useDefs) Some("y") else None
       defaultChoice orElse SimpleReader.readLine(s"Delete branch $branch (y/n)? [y] ") match {
         case Some("y") | Some("") =>
-          git.deleteLocalBranch(branch)
           if(!skipPush) {
             val remote = git.trackingRemote(branch)
             git.deleteRemoteBranch(remote, branch)
           } else {
             info(s"Skipping deleting remote branch $branch...")
           }
+          git.deleteLocalBranch(branch)
         case _ =>
       }
     }

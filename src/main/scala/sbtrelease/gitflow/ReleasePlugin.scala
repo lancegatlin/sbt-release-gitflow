@@ -71,7 +71,7 @@ object ReleasePlugin extends AutoPlugin {
           val helper = new Helper(cfg)
           import helper._
 
-          findReleaseBranch(searchRemote = true) match {
+          findReleaseBranch(searchRemote = true, artifactName) match {
             case Some(releaseBranch) =>
               // Checkout in case its only on remote
               checkoutBranch(releaseBranch)
@@ -128,7 +128,7 @@ object ReleasePlugin extends AutoPlugin {
       ensureNotBehindRemote()
 
       log.info("Ensuring no release branch is already present... ")
-      findReleaseBranch(searchRemote = true) match {
+      findReleaseBranch(searchRemote = true,artifactName) match {
         case Some(releaseBranch) =>
           if(flags.skipIfExists) {
             log.info("Skipping creating release branch")
@@ -186,7 +186,7 @@ object ReleasePlugin extends AutoPlugin {
       import helper._
 
       ensureStagingClean()
-      val releaseBranch = findReleaseBranch(searchRemote = false).getOrDie("Could not find release branch!")
+      val releaseBranch = findReleaseBranch(searchRemote = false,artifactName).getOrDie("Could not find release branch!")
       ensureCurrentBranch(releaseBranch)
       // If skipPush is set then there may not be a tracking remote for the release branch
       // since create was probably called with skipPush
